@@ -1,0 +1,636 @@
+{
+  "displayName": "Process campaign replies",
+  "definition": {
+    "steps": [
+      {
+        "id": "if_event",
+        "switch": {
+          "cases": [
+            {
+              "when": "type(input) == map && type(input.?thread_id.orValue(null)) == string && input.thread_id.trim() != \"\" && type(input.?label_id.orValue(null)) == string && input.label_id.trim() != \"\"",
+              "next": "get_label"
+            },
+            {
+              "when": "type(input) == map && type(input.?thread_id.orValue(null)) == string && input.thread_id.trim() != \"\" && type(input.?reply_message_id.orValue(null)) == string && input.reply_message_id.trim() != \"\"",
+              "next": "list_labels"
+            }
+          ],
+          "default": "end_event_missing"
+        },
+        "label": "Event payload present?"
+      },
+      {
+        "id": "get_label",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "getLabel"
+          },
+          "args": {
+            "id": {
+              "expr": "string(((type(input.label_id) == string && input.label_id != \"\") ? input.label_id : \"\")).trim()"
+            }
+          },
+          "result": "vars.get_label"
+        },
+        "next": "stash_label",
+        "label": "Read the label"
+      },
+      {
+        "id": "stash_label",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.label_name",
+              "value": {
+                "expr": "string(vars.get_label.?name.orValue(\"\")).trim()"
+              }
+            }
+          ]
+        },
+        "next": "if_interested",
+        "label": "Save the label name"
+      },
+      {
+        "id": "if_interested",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.label_name == \"Interested\"",
+              "next": "if_already_replied"
+            }
+          ],
+          "default": "end_interested_ignored"
+        },
+        "label": "Interested label?"
+      },
+      {
+        "id": "if_already_replied",
+        "switch": {
+          "cases": [
+            {
+              "when": "input.?reply_sent_after_latest_inbound.orValue(false) == true",
+              "next": "end_already_replied"
+            }
+          ],
+          "default": "get_thread"
+        },
+        "label": "Reply already sent?"
+      },
+      {
+        "id": "end_already_replied",
+        "return": {
+          "value": {
+            "literal": "reply_already_sent"
+          }
+        },
+        "label": "Already replied"
+      },
+      {
+        "id": "list_labels",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "listLabels"
+          },
+          "args": {},
+          "result": "vars.list_labels"
+        },
+        "next": "stash_interested",
+        "label": "List labels"
+      },
+      {
+        "id": "stash_interested",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.interested",
+              "value": {
+                "expr": "size(vars.list_labels.?labels.orValue([]).filter(label, string(label.?name.orValue(\"\")).trim() == \"Interested\" && type(input.?user_label_ids.orValue(null)) == list && input.user_label_ids.exists(id, string(id) == string(label.?id.orValue(\"\"))))) > 0"
+              }
+            }
+          ]
+        },
+        "next": "if_interested_on_reply",
+        "label": "Interested on the reply?"
+      },
+      {
+        "id": "if_interested_on_reply",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.interested == true",
+              "next": "if_already_replied"
+            }
+          ],
+          "default": "end_reply_interested_ignored"
+        },
+        "label": "Interested still present?"
+      },
+      {
+        "id": "end_interested_ignored",
+        "return": {
+          "value": {
+            "literal": "interested_ignored"
+          }
+        },
+        "label": "Interested ignored"
+      },
+      {
+        "id": "end_reply_interested_ignored",
+        "return": {
+          "value": {
+            "literal": "interested_ignored"
+          }
+        },
+        "label": "Interested ignored"
+      },
+      {
+        "id": "end_event_missing",
+        "return": {
+          "value": {
+            "literal": "event_missing"
+          }
+        },
+        "label": "Event missing"
+      },
+      {
+        "id": "get_thread",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "getThread"
+          },
+          "args": {
+            "id": {
+              "expr": "string(((type(input.thread_id) == string && input.thread_id != \"\") ? input.thread_id : \"\")).trim()"
+            },
+            "format": {
+              "literal": "FULL"
+            }
+          },
+          "result": "vars.get_thread"
+        },
+        "next": "stash_thread",
+        "label": "Read the thread"
+      },
+      {
+        "id": "stash_thread",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.thread_id",
+              "value": {
+                "expr": "string(((type(input.thread_id) == string && input.thread_id != \"\") ? input.thread_id : \"\")).trim()"
+              }
+            },
+            {
+              "path": "vars.thread_plan",
+              "value": {
+                "expr": "size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) == 0 ? {\"action\": \"invalid\", \"inboundMessageId\": \"\", \"accountId\": \"\"} : (string(vars.get_thread.?messages.orValue([])[(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\"))))[size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) - 1]].?id.orValue(\"\")).trim() == \"\" ? {\"action\": \"invalid\", \"inboundMessageId\": \"\", \"accountId\": \"\"} : (lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, i > (lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\"))))[size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) - 1]).exists(i, ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_DIRECT\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(-1) == 1)) ? {\"action\": \"already\", \"inboundMessageId\": string(vars.get_thread.?messages.orValue([])[(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\"))))[size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) - 1]].?id.orValue(\"\")).trim(), \"accountId\": string(vars.get_thread.?messages.orValue([])[(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\"))))[size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) - 1]].?accountId.orValue(\"\")).trim()} : {\"action\": \"reply\", \"inboundMessageId\": string(vars.get_thread.?messages.orValue([])[(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\"))))[size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) - 1]].?id.orValue(\"\")).trim(), \"accountId\": string(vars.get_thread.?messages.orValue([])[(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\"))))[size(lists.range(size(vars.get_thread.?messages.orValue([]))).filter(i, (!((vars.get_thread.?messages.orValue([])[i]).?labelIds.orValue([]).exists(label, label == \"DRAFTS\")) && ((vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(null) == null || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"\" || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(0) == 0 || (vars.get_thread.?messages.orValue([])[i]).?sendSource.orValue(\"\") == \"MESSAGE_SEND_SOURCE_UNSPECIFIED\")))) - 1]].?accountId.orValue(\"\")).trim()}))"
+              }
+            }
+          ]
+        },
+        "next": "if_thread_reply",
+        "label": "Choose the latest inbound message"
+      },
+      {
+        "id": "if_thread_reply",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.thread_plan.action == \"reply\"",
+              "next": "get_reply_message"
+            }
+          ],
+          "default": "if_thread_already_replied"
+        },
+        "label": "Thread needs a reply?"
+      },
+      {
+        "id": "get_reply_message",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "getMessage"
+          },
+          "args": {
+            "id": {
+              "expr": "vars.thread_plan.inboundMessageId"
+            },
+            "format": {
+              "literal": "FULL"
+            }
+          },
+          "result": "vars.get_reply_message"
+        },
+        "next": "stash_reply",
+        "label": "Read the inbound message"
+      },
+      {
+        "id": "stash_reply",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.inbound_message_id",
+              "value": {
+                "expr": "(vars.get_reply_message != null && string(vars.get_reply_message.?id.orValue(\"\")) != \"\" ? string(vars.get_reply_message.id).trim() : string(vars.thread_plan.inboundMessageId))"
+              }
+            },
+            {
+              "path": "vars.account_id",
+              "value": {
+                "expr": "(vars.get_reply_message != null && string(vars.get_reply_message.?accountId.orValue(\"\")) != \"\" ? string(vars.get_reply_message.accountId).trim() : string(vars.thread_plan.accountId))"
+              }
+            },
+            {
+              "path": "vars.reply_text",
+              "value": {
+                "expr": "((size([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/plain\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/plain\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/plain\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")) > 0 ? string(base64.decode([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/plain\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/plain\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/plain\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")[0].replace(\"-\", \"+\").replace(\"_\", \"/\"))) : \"\") != \"\" ? (size([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/plain\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/plain\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/plain\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")) > 0 ? string(base64.decode([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/plain\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/plain\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/plain\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")[0].replace(\"-\", \"+\").replace(\"_\", \"/\"))) : \"\") : ((size([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/html\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/html\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/html\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")) > 0 ? string(base64.decode([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/html\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/html\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/html\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")[0].replace(\"-\", \"+\").replace(\"_\", \"/\"))) : \"\") != \"\" ? (size([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/html\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/html\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/html\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")) > 0 ? string(base64.decode([(((vars.get_reply_message.?payload.orValue({})).?mimeType.orValue(\"\") == \"text/html\" && (vars.get_reply_message.?payload.orValue({})).?body.?data.orValue(\"\") != \"\") ? (vars.get_reply_message.?payload.orValue({})).body.data : \"\"), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, (((part).?mimeType.orValue(\"\") == \"text/html\" && (part).?body.?data.orValue(\"\") != \"\") ? (part).body.data : \"\")), (vars.get_reply_message.?payload.orValue({})).?parts.orValue([]).map(part, part.?parts.orValue([]).map(child, (((child).?mimeType.orValue(\"\") == \"text/html\" && (child).?body.?data.orValue(\"\") != \"\") ? (child).body.data : \"\"))).flatten()].flatten().filter(text, text != \"\")[0].replace(\"-\", \"+\").replace(\"_\", \"/\"))) : \"\") : vars.get_reply_message.?snippet.orValue(\"\")))"
+              }
+            },
+            {
+              "path": "vars.contact_email",
+              "value": {
+                "expr": "((((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\".*<[^<>]+>.*\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).substring((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).indexOf(\"<\") + 1, (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).lastIndexOf(\">\")).trim() : (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).trim()).lowerAscii().startsWith(\"mailto:\") ? ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\".*<[^<>]+>.*\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).substring((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).indexOf(\"<\") + 1, (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).lastIndexOf(\">\")).trim() : (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).trim()).substring(7).trim() : ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\".*<[^<>]+>.*\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).substring((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).indexOf(\"<\") + 1, (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).lastIndexOf(\">\")).trim() : (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).trim())).matches(\"^[^@\\\\s]+@[^@\\\\s]+$\") ? (((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\".*<[^<>]+>.*\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).substring((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).indexOf(\"<\") + 1, (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).lastIndexOf(\">\")).trim() : (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).trim()).lowerAscii().startsWith(\"mailto:\") ? ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\".*<[^<>]+>.*\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).substring((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).indexOf(\"<\") + 1, (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).lastIndexOf(\">\")).trim() : (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).trim()).substring(7).trim() : ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\".*<[^<>]+>.*\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).substring((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).indexOf(\"<\") + 1, (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).lastIndexOf(\">\")).trim() : (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"from\" && type(header.?value.orValue(null)) == string)[0].value).trim()).trim())) : \"\")"
+              }
+            },
+            {
+              "path": "vars.subject",
+              "value": {
+                "expr": "((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)[0].value).trim()) == \"\" ? \"Re:\" : ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)[0].value).trim()).matches(\"(?i)^re:\") ? (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)[0].value).trim()) : \"Re: \" + (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"subject\" && type(header.?value.orValue(null)) == string)[0].value).trim())))"
+              }
+            },
+            {
+              "path": "vars.rfc_message_id",
+              "value": {
+                "expr": "(size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)[0].value).trim())"
+              }
+            },
+            {
+              "path": "vars.references",
+              "value": {
+                "expr": "(((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)[0].value).trim()) != \"\" && !((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"references\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"references\" && type(header.?value.orValue(null)) == string)[0].value).trim()).split(\" \").filter(part, part != \"\")).exists(part, part == (size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)[0].value).trim())) ? ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"references\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"references\" && type(header.?value.orValue(null)) == string)[0].value).trim()).split(\" \").filter(part, part != \"\")) + [(size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"message-id\" && type(header.?value.orValue(null)) == string)[0].value).trim())] : ((size((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"references\" && type(header.?value.orValue(null)) == string)) == 0 ? \"\" : string((vars.get_reply_message).?payload.?headers.orValue([]).filter(header, header.?name.orValue(\"\").lowerAscii() == \"references\" && type(header.?value.orValue(null)) == string)[0].value).trim()).split(\" \").filter(part, part != \"\"))).join(\" \"))"
+              }
+            },
+            {
+              "path": "vars.request_id",
+              "value": {
+                "expr": "(string(vars.get_reply_message.?id.orValue(\"\")).trim().lowerAscii().matches(\"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$\") ? string(vars.get_reply_message.?id.orValue(\"\")).trim().lowerAscii() : \"\")"
+              }
+            },
+            {
+              "path": "vars.outbound_message_id",
+              "value": {
+                "expr": "(string(vars.get_reply_message.?id.orValue(\"\")).trim().lowerAscii().matches(\"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$\") ? string(vars.get_reply_message.?id.orValue(\"\")).trim().lowerAscii().substring(0, 14) + (string(vars.get_reply_message.?id.orValue(\"\")).trim().lowerAscii().substring(14, 15) == \"5\" ? \"4\" : \"5\") + string(vars.get_reply_message.?id.orValue(\"\")).trim().lowerAscii().substring(15) : \"\")"
+              }
+            }
+          ]
+        },
+        "next": "get_sender_account",
+        "label": "Save the reply target"
+      },
+      {
+        "id": "get_sender_account",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "getAccount"
+          },
+          "args": {
+            "account_id": {
+              "expr": "vars.account_id"
+            }
+          },
+          "result": "vars.get_sender_account"
+        },
+        "next": "stash_sender",
+        "label": "Read the receiving account"
+      },
+      {
+        "id": "stash_sender",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.sender_email",
+              "value": {
+                "expr": "(type(vars.get_sender_account.?email_address.orValue(null)) == string ? string(vars.get_sender_account.email_address).trim() : \"\")"
+              }
+            }
+          ]
+        },
+        "next": "if_reply_context",
+        "label": "Save the sender address"
+      },
+      {
+        "id": "if_reply_context",
+        "switch": {
+          "cases": [
+            {
+              "when": "[type(vars.thread_id) == string && vars.thread_id.trim() != \"\" && type(vars.account_id) == string && vars.account_id.trim() != \"\" && type(vars.sender_email) == string && vars.sender_email.trim() != \"\" && type(vars.contact_email) == string && vars.contact_email.trim() != \"\" && type(vars.rfc_message_id) == string && vars.rfc_message_id.trim() != \"\" && type(vars.references) == string && vars.references.trim() != \"\" && type(vars.inbound_message_id) == string && vars.inbound_message_id.trim() != \"\"][0] && vars.request_id.trim().lowerAscii().matches(\"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$\") && vars.outbound_message_id.trim().lowerAscii().matches(\"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$\") && vars.request_id != vars.outbound_message_id",
+              "next": "write_reply"
+            }
+          ],
+          "default": "record_reply_context_exception"
+        },
+        "label": "Reply context complete?"
+      },
+      {
+        "id": "write_reply",
+        "call": {
+          "installedApp": {
+            "installation": "openrouter",
+            "operation": "chatCompletions"
+          },
+          "args": {
+            "model": {
+              "literal": "openai/gpt-4o-mini"
+            },
+            "temperature": {
+              "literal": 0
+            },
+            "messages": {
+              "expr": "[{\"role\":\"system\",\"content\":\"Write one concise truthful plain-text reply to this inbound B2B cold email. Return only the reply text. Do not wrap it in JSON. The reply continues the conversation. Do not invent facts, pricing, availability, or commitments.\"}, ({\"role\": \"user\", \"content\": (\"Prospect email: \" + string(vars.contact_email) + \"\\nProspect reply:\\n\" + string(vars.reply_text))})]"
+            }
+          },
+          "result": "vars.write_reply"
+        },
+        "next": "read_reply",
+        "label": "Write the reply"
+      },
+      {
+        "id": "read_reply",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.reply_text",
+              "value": {
+                "expr": "string(vars.write_reply.?choices.orValue([])[0].?message.?content.orValue(\"\")).trim()"
+              }
+            },
+            {
+              "path": "vars.reply_base64",
+              "value": {
+                "expr": "base64.encode(bytes(string(vars.write_reply.?choices.orValue([])[0].?message.?content.orValue(\"\")).trim()))"
+              }
+            }
+          ]
+        },
+        "next": "if_reply_text",
+        "label": "Read the reply text"
+      },
+      {
+        "id": "if_reply_text",
+        "switch": {
+          "cases": [
+            {
+              "when": "type(vars.reply_text) == string && vars.reply_text.trim() != \"\"",
+              "next": "send_reply"
+            }
+          ],
+          "default": "record_reply_text_exception"
+        },
+        "label": "Reply text present?"
+      },
+      {
+        "id": "send_reply",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "sendMessage"
+          },
+          "args": {
+            "body": {
+              "expr": "{\"requestId\": (vars.request_id), \"message\": ({\"id\": (vars.outbound_message_id), \"threadId\": (vars.thread_id), \"accountId\": (vars.account_id), \"payload\": ({\"mimeType\": \"multipart/alternative\", \"headers\": ([({\"name\": \"From\", \"value\": (vars.sender_email)}), ({\"name\": \"To\", \"value\": (vars.contact_email)}), ({\"name\": \"Subject\", \"value\": (vars.subject)}), ({\"name\": \"In-Reply-To\", \"value\": (vars.rfc_message_id)}), ({\"name\": \"References\", \"value\": (vars.references)})]), \"parts\": ([({\"mimeType\": \"text/plain\", \"body\": ({\"data\": (vars.reply_base64)})})])})})}"
+            }
+          },
+          "result": "vars.send_reply",
+          "onError": {
+            "next": "record_send_exception",
+            "error": "vars.send_reply_error"
+          }
+        },
+        "next": "end_reply_sent",
+        "label": "Send the reply"
+      },
+      {
+        "id": "end_reply_sent",
+        "return": {
+          "value": {
+            "literal": "reply_sent"
+          }
+        },
+        "label": "Reply sent"
+      },
+      {
+        "id": "record_send_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":reply:\" + vars.inbound_message_id), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Process campaign replies\", \"Kind\": \"reply\", \"Subject\": (vars.contact_email), \"Email\": (vars.sender_email), \"Detail\": (\"sendMessage:\" + string((vars.send_reply_error.reason != \"\" ? vars.send_reply_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.record_send_exception"
+        },
+        "next": "end_send_failed",
+        "label": "Record that the reply was not sent"
+      },
+      {
+        "id": "end_send_failed",
+        "return": {
+          "value": {
+            "literal": "send_reply_failed"
+          }
+        },
+        "label": "Send failed"
+      },
+      {
+        "id": "record_reply_text_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":reply:\" + vars.inbound_message_id), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Process campaign replies\", \"Kind\": \"reply\", \"Subject\": (vars.contact_email), \"Email\": (vars.sender_email), \"Detail\": (\"reply_text_missing: \" + vars.inbound_message_id), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.record_reply_text_exception"
+        },
+        "next": "end_reply_text_missing",
+        "label": "Queue the empty reply"
+      },
+      {
+        "id": "end_reply_text_missing",
+        "return": {
+          "value": {
+            "literal": "reply_text_missing"
+          }
+        },
+        "label": "Reply text missing"
+      },
+      {
+        "id": "record_reply_context_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":reply:\" + vars.inbound_message_id), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Process campaign replies\", \"Kind\": \"reply\", \"Subject\": ((type(vars.contact_email) == string && vars.contact_email.trim() != \"\" ? vars.contact_email.trim() : string(vars.inbound_message_id))), \"Email\": (vars.sender_email), \"Detail\": (\"reply_context_invalid: \" + vars.inbound_message_id), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.record_reply_context_exception"
+        },
+        "next": "end_reply_context_invalid",
+        "label": "Queue the incomplete reply"
+      },
+      {
+        "id": "end_reply_context_invalid",
+        "return": {
+          "value": {
+            "literal": "reply_context_invalid"
+          }
+        },
+        "label": "Reply context invalid"
+      },
+      {
+        "id": "if_thread_already_replied",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.thread_plan.action == \"already\"",
+              "next": "end_thread_already_replied"
+            }
+          ],
+          "default": "record_missing_inbound"
+        },
+        "label": "Thread already has a direct reply?"
+      },
+      {
+        "id": "end_thread_already_replied",
+        "return": {
+          "value": {
+            "literal": "reply_already_sent"
+          }
+        },
+        "label": "Thread already replied"
+      },
+      {
+        "id": "record_missing_inbound",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":reply:\" + vars.thread_id), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Process campaign replies\", \"Kind\": \"reply\", \"Subject\": (vars.thread_id), \"Email\": \"\", \"Detail\": (\"reply_context_invalid: \" + vars.thread_id), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.record_missing_inbound"
+        },
+        "next": "end_missing_inbound",
+        "label": "Queue the thread with no inbound message"
+      },
+      {
+        "id": "end_missing_inbound",
+        "return": {
+          "value": {
+            "literal": "reply_context_invalid"
+          }
+        },
+        "label": "Missing inbound"
+      }
+    ],
+    "input": "any",
+    "vars": {
+      "account_id": "any",
+      "contact_email": "any",
+      "get_label": "any",
+      "get_reply_message": "any",
+      "get_sender_account": "any",
+      "get_thread": "any",
+      "inbound_message_id": "any",
+      "outbound_message_id": "any",
+      "record_missing_inbound": "any",
+      "record_reply_context_exception": "any",
+      "record_reply_text_exception": "any",
+      "record_send_exception": "any",
+      "references": "any",
+      "reply_base64": "any",
+      "reply_text": "any",
+      "request_id": "any",
+      "rfc_message_id": "any",
+      "send_reply": "any",
+      "send_reply_error": "any",
+      "sender_email": "any",
+      "subject": "any",
+      "thread_id": "any",
+      "thread_plan": "any",
+      "write_reply": "any",
+      "label_name": "any",
+      "list_labels": "any",
+      "interested": "any"
+    }
+  }
+}

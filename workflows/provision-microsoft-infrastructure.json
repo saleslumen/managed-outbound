@@ -1,0 +1,1612 @@
+{
+  "displayName": "Provision Microsoft infrastructure",
+  "definition": {
+    "steps": [
+      {
+        "id": "if_provision_input_valid",
+        "switch": {
+          "cases": [
+            {
+              "when": "type(input.namespace_name) == string && input.namespace_name.trim() != \"\" && type(input.domain) == string && input.domain.trim() != \"\" && input.domain_registration != null && type(input.domain_registration) == map && input.mailbox != null && type(input.mailbox) == map && type(input.mailbox.firstName) == string && input.mailbox.firstName.trim() != \"\" && type(input.mailbox.lastName) == string && input.mailbox.lastName.trim() != \"\" && type(input.mailbox.username) == string && input.mailbox.username.trim() != \"\"",
+              "next": "close_provision_input_exception"
+            }
+          ],
+          "default": "open_provision_input_exception"
+        },
+        "label": "Provisioning input is valid?"
+      },
+      {
+        "id": "close_provision_input_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:microsoft:input\"), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Invalid Microsoft provisioning input\", \"Domain\": (string(((type(input.domain) == string && input.domain != \"\") ? input.domain : \"\")).lowerAscii()), \"Detail\": \"\", \"Status\": \"closed\"})})]"
+            }
+          },
+          "result": "vars.close_provision_input_exception"
+        },
+        "next": "assign_unit",
+        "label": "Close the provisioning input exception"
+      },
+      {
+        "id": "assign_unit",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.domain",
+              "value": {
+                "expr": "string(input.domain).trim().lowerAscii()"
+              }
+            },
+            {
+              "path": "vars.domain_registration",
+              "value": {
+                "expr": "(has(input.domain_registration.nameservers) ? {\"duration\": 1, \"privacy\": \"full\", \"nameservers\": input.domain_registration.nameservers} : {\"duration\": 1, \"privacy\": \"full\"})"
+              }
+            },
+            {
+              "path": "vars.currency",
+              "value": {
+                "expr": "input.currency"
+              }
+            },
+            {
+              "path": "vars.mailbox",
+              "value": {
+                "expr": "{\"firstName\": string(input.mailbox.firstName).trim(), \"lastName\": string(input.mailbox.lastName).trim(), \"username\": string(input.mailbox.username).trim()}"
+              }
+            }
+          ]
+        },
+        "next": "register_domain",
+        "label": "Assign this inbox"
+      },
+      {
+        "id": "register_domain",
+        "call": {
+          "installedApp": {
+            "installation": "dynadot",
+            "operation": "registerDomain"
+          },
+          "args": {
+            "domain_name": {
+              "expr": "vars.domain"
+            },
+            "domain": {
+              "expr": "vars.domain_registration"
+            },
+            "currency": {
+              "expr": "vars.currency"
+            }
+          },
+          "result": "vars.register_domain"
+        },
+        "next": "close_dynadot_exception",
+        "label": "Register domain"
+      },
+      {
+        "id": "close_dynadot_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:dynadot:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Dynadot domain lookup failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": \"\", \"Status\": \"closed\"})})]"
+            }
+          },
+          "result": "vars.close_dynadot_exception"
+        },
+        "next": "record_dynadot_domain",
+        "label": "Close the Dynadot lookup exception"
+      },
+      {
+        "id": "record_dynadot_domain",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Domains"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Domain"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Domain\": (string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace)})})]"
+            }
+          },
+          "result": "vars.record_dynadot_domain"
+        },
+        "next": "upsert_namespace",
+        "label": "Record the Dynadot domain"
+      },
+      {
+        "id": "upsert_namespace",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Namespaces"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Saleslumen Namespace ID"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Name\": (string(input.namespace_name).trim()), \"Saleslumen Namespace ID\": (execution.namespace), \"Status\": \"onboarding\", \"Zapmail Workspace ID\": (input.zapmail_workspace_id)})})]"
+            }
+          },
+          "result": "vars.upsert_namespace"
+        },
+        "next": "set_nameservers",
+        "label": "Upsert namespace"
+      },
+      {
+        "id": "set_nameservers",
+        "call": {
+          "installedApp": {
+            "installation": "dynadot",
+            "operation": "setNameservers"
+          },
+          "args": {
+            "domain_name": {
+              "expr": "vars.domain"
+            },
+            "nameserver_list": {
+              "literal": [
+                "pns61.cloudns.net",
+                "pns62.cloudns.com",
+                "pns63.cloudns.net",
+                "pns64.cloudns.uk"
+              ]
+            }
+          },
+          "result": "vars.set_nameservers",
+          "onError": {
+            "next": "open_nameservers_failed",
+            "error": "vars.set_nameservers_error"
+          }
+        },
+        "next": "connect_domain",
+        "label": "Set CloudNS nameservers"
+      },
+      {
+        "id": "connect_domain",
+        "call": {
+          "installedApp": {
+            "installation": "zapmail",
+            "operation": "connectDomains"
+          },
+          "args": {
+            "serviceProvider": {
+              "literal": "MICROSOFT"
+            },
+            "x-workspace-key": {
+              "expr": "input.zapmail_workspace_id"
+            },
+            "domainNames": {
+              "expr": "[(vars.domain)]"
+            }
+          },
+          "result": "vars.connect_domain",
+          "onError": {
+            "next": "open_zapmail_connect_failed",
+            "error": "vars.connect_domain_error"
+          }
+        },
+        "next": "wait_domain_dns",
+        "label": "Connect domain"
+      },
+      {
+        "id": "wait_domain_dns",
+        "wait": {
+          "duration": "43200s"
+        },
+        "next": "list_zapmail_domain_after_dns",
+        "label": "Wait 12 hours for Zapmail DNS"
+      },
+      {
+        "id": "list_zapmail_domain_after_dns",
+        "call": {
+          "installedApp": {
+            "installation": "zapmail",
+            "operation": "listDomains"
+          },
+          "args": {
+            "contains": {
+              "expr": "vars.domain"
+            },
+            "page": {
+              "literal": "1"
+            },
+            "limit": {
+              "literal": "10"
+            },
+            "x-workspace-key": {
+              "expr": "input.zapmail_workspace_id"
+            },
+            "serviceProvider": {
+              "literal": "MICROSOFT"
+            }
+          },
+          "result": "vars.list_zapmail_domain_after_dns",
+          "onError": {
+            "next": "open_zapmail_lookup_failed",
+            "error": "vars.list_zapmail_domain_after_dns_error"
+          }
+        },
+        "next": "stash_zapmail_domain_after_dns",
+        "label": "List the Zapmail domain after the DNS wait"
+      },
+      {
+        "id": "stash_zapmail_domain_after_dns",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.zapmail_domain",
+              "value": {
+                "expr": "string(vars.list_zapmail_domain_after_dns.?data.orValue(\"\")).trim()"
+              }
+            },
+            {
+              "path": "vars.zapmail_domain_total_pages",
+              "value": {
+                "expr": "string(vars.list_zapmail_domain_after_dns.?data.orValue(\"\")).trim()"
+              }
+            }
+          ]
+        },
+        "next": "if_zapmail_domain_after_dns",
+        "label": "Save the Zapmail domain after the DNS wait"
+      },
+      {
+        "id": "if_zapmail_domain_after_dns",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.zapmail_domain != null",
+              "next": "stash_zapmail_domain_fields_after_dns"
+            }
+          ],
+          "default": "open_domain_missing"
+        },
+        "label": "Zapmail has this domain after the DNS wait?"
+      },
+      {
+        "id": "open_nameservers_failed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:nameservers:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Nameservers were not set\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"setNameservers:\" + string((vars.set_nameservers_error.reason != \"\" ? vars.set_nameservers_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_nameservers_failed"
+        },
+        "next": "end_nameservers_failed",
+        "label": "Record that nameservers were not set"
+      },
+      {
+        "id": "end_nameservers_failed",
+        "return": {
+          "value": {
+            "literal": "nameservers_failed"
+          }
+        },
+        "label": "Nameservers failed"
+      },
+      {
+        "id": "open_zapmail_connect_failed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail domain connection failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"connectDomains:\" + string((vars.connect_domain_error.reason != \"\" ? vars.connect_domain_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_zapmail_connect_failed"
+        },
+        "next": "end_zapmail_connect_failed",
+        "label": "Record that Zapmail did not connect the domain"
+      },
+      {
+        "id": "end_zapmail_connect_failed",
+        "return": {
+          "value": {
+            "literal": "zapmail_connect_failed"
+          }
+        },
+        "label": "Zapmail connect failed"
+      },
+      {
+        "id": "open_zapmail_lookup_failed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail domain lookup failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"listDomains:\" + string((vars.list_zapmail_domain_after_dns_error.reason != \"\" ? vars.list_zapmail_domain_after_dns_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_zapmail_lookup_failed"
+        },
+        "next": "end_zapmail_lookup_failed",
+        "label": "Record that the Zapmail domain lookup failed"
+      },
+      {
+        "id": "end_zapmail_lookup_failed",
+        "return": {
+          "value": {
+            "literal": "zapmail_domain_lookup_failed"
+          }
+        },
+        "label": "Zapmail lookup failed"
+      },
+      {
+        "id": "stash_zapmail_domain_fields_after_dns",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.zapmail_domain_id",
+              "value": {
+                "expr": "string(vars.zapmail_domain.id == null ? \"\" : vars.zapmail_domain.id)"
+              }
+            },
+            {
+              "path": "vars.zapmail_domain_status",
+              "value": {
+                "expr": "vars.zapmail_domain.status == null ? \"\" : string(vars.zapmail_domain.status)"
+              }
+            },
+            {
+              "path": "vars.zapmail_domain_forward_to",
+              "value": {
+                "expr": "vars.zapmail_domain.forwardTo == null ? \"\" : string(vars.zapmail_domain.forwardTo)"
+              }
+            }
+          ]
+        },
+        "next": "if_domain_active_after_dns",
+        "label": "Save Zapmail domain fields after the DNS wait"
+      },
+      {
+        "id": "if_domain_active_after_dns",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.zapmail_domain_status == \"ACTIVE\"",
+              "next": "add_domain_forwarding"
+            }
+          ],
+          "default": "if_domain_waiting_after_dns"
+        },
+        "label": "Zapmail domain is active after the DNS wait?"
+      },
+      {
+        "id": "add_domain_forwarding",
+        "call": {
+          "installedApp": {
+            "installation": "zapmail",
+            "operation": "addDomainForwarding"
+          },
+          "args": {
+            "x-workspace-key": {
+              "expr": "input.zapmail_workspace_id"
+            },
+            "serviceProvider": {
+              "literal": "MICROSOFT"
+            },
+            "domainIds": {
+              "expr": "[(vars.zapmail_domain_id)]"
+            },
+            "forwardTo": {
+              "literal": "example.com"
+            },
+            "contains": {
+              "literal": ""
+            },
+            "tagIds": {
+              "literal": []
+            }
+          },
+          "result": "vars.add_domain_forwarding",
+          "onError": {
+            "next": "open_zapmail_forward_failed",
+            "error": "vars.add_domain_forwarding_error"
+          }
+        },
+        "next": "close_zapmail_exception",
+        "label": "Forward the domain to example.com"
+      },
+      {
+        "id": "close_zapmail_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"ZapMail domain setup failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": \"\", \"Status\": \"closed\"})})]"
+            }
+          },
+          "result": "vars.close_zapmail_exception"
+        },
+        "next": "assign_mailboxes",
+        "label": "Close the Zapmail domain exception"
+      },
+      {
+        "id": "assign_mailboxes",
+        "call": {
+          "installedApp": {
+            "installation": "zapmail",
+            "operation": "assignMailboxes"
+          },
+          "args": {
+            "serviceProvider": {
+              "literal": "MICROSOFT"
+            },
+            "x-workspace-key": {
+              "expr": "input.zapmail_workspace_id"
+            },
+            "body": {
+              "expr": "{vars.zapmail_domain_id: [{\"firstName\": string(vars.mailbox.firstName).trim(), \"lastName\": string(vars.mailbox.lastName).trim(), \"mailboxUsername\": string(vars.mailbox.username).trim(), \"domainName\": string(vars.domain).lowerAscii()}]}"
+            }
+          },
+          "result": "vars.assign_mailboxes",
+          "onError": {
+            "next": "open_mailbox_assign_failed",
+            "error": "vars.assign_mailboxes_error"
+          }
+        },
+        "next": "record_assigned_mailbox",
+        "label": "Assign this mailbox"
+      },
+      {
+        "id": "record_assigned_mailbox",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Email Accounts"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Email"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Domain\": (string(vars.domain).lowerAscii()), \"Status\": \"provisioning\"})})]"
+            }
+          },
+          "result": "vars.record_assigned_mailbox"
+        },
+        "next": "wait_mailbox",
+        "label": "Record the mailbox that was just assigned"
+      },
+      {
+        "id": "wait_mailbox",
+        "wait": {
+          "duration": "43200s"
+        },
+        "next": "list_mailboxes",
+        "label": "Wait 12 hours for the mailbox"
+      },
+      {
+        "id": "list_mailboxes",
+        "call": {
+          "installedApp": {
+            "installation": "zapmail",
+            "operation": "listMailboxes"
+          },
+          "args": {
+            "serviceProvider": {
+              "literal": "MICROSOFT"
+            },
+            "x-workspace-key": {
+              "expr": "input.zapmail_workspace_id"
+            },
+            "contains": {
+              "expr": "vars.domain"
+            },
+            "page": {
+              "literal": "1"
+            },
+            "limit": {
+              "literal": "50"
+            }
+          },
+          "result": "vars.list_mailboxes",
+          "onError": {
+            "next": "open_mailbox_lookup_failed",
+            "error": "vars.list_mailboxes_error"
+          }
+        },
+        "next": "stash_zapmail_mailboxes",
+        "label": "Read this mailbox"
+      },
+      {
+        "id": "stash_zapmail_mailboxes",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.zapmail_mailboxes",
+              "value": {
+                "expr": "string(vars.list_mailboxes.?data.orValue(\"\")).trim()"
+              }
+            }
+          ]
+        },
+        "next": "if_mailbox_listed",
+        "label": "Save this mailbox"
+      },
+      {
+        "id": "if_mailbox_listed",
+        "switch": {
+          "cases": [
+            {
+              "when": "((size((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())) > 0 && (vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].?id.orValue(null) != null ? string((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].id) : \"\")) != \"\"",
+              "next": "record_mailbox_id"
+            }
+          ],
+          "default": "open_mailbox_not_listed"
+        },
+        "label": "Zapmail listed this mailbox?"
+      },
+      {
+        "id": "open_zapmail_forward_failed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail forwarding failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"addDomainForwarding:\" + string((vars.add_domain_forwarding_error.reason != \"\" ? vars.add_domain_forwarding_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_zapmail_forward_failed"
+        },
+        "next": "end_zapmail_forward_failed",
+        "label": "Record that Zapmail forwarding failed"
+      },
+      {
+        "id": "end_zapmail_forward_failed",
+        "return": {
+          "value": {
+            "literal": "zapmail_forward_failed"
+          }
+        },
+        "label": "Zapmail forward failed"
+      },
+      {
+        "id": "open_mailbox_assign_failed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:mailbox:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail mailbox assignment failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"assignMailboxes:\" + string((vars.assign_mailboxes_error.reason != \"\" ? vars.assign_mailboxes_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_mailbox_assign_failed"
+        },
+        "next": "end_mailbox_assign_failed",
+        "label": "Record that the mailbox was not assigned"
+      },
+      {
+        "id": "end_mailbox_assign_failed",
+        "return": {
+          "value": {
+            "literal": "mailbox_assign_failed"
+          }
+        },
+        "label": "Mailbox assign failed"
+      },
+      {
+        "id": "open_mailbox_lookup_failed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:mailbox:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail mailbox lookup failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"listMailboxes:\" + string((vars.list_mailboxes_error.reason != \"\" ? vars.list_mailboxes_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_mailbox_lookup_failed"
+        },
+        "next": "end_mailbox_lookup_failed",
+        "label": "Record that the mailbox lookup failed"
+      },
+      {
+        "id": "end_mailbox_lookup_failed",
+        "return": {
+          "value": {
+            "literal": "mailbox_lookup_failed"
+          }
+        },
+        "label": "Mailbox lookup failed"
+      },
+      {
+        "id": "record_mailbox_id",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Email Accounts"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Email"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Domain\": (string(vars.domain).lowerAscii()), \"Zapmail Mailbox ID\": ((size((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())) > 0 && (vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].?id.orValue(null) != null ? string((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].id) : \"\")), \"Status\": \"provisioning\"})})]"
+            }
+          },
+          "result": "vars.record_mailbox_id"
+        },
+        "next": "close_mailbox_exception",
+        "label": "Record the Zapmail mailbox id"
+      },
+      {
+        "id": "close_mailbox_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:mailbox:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail mailbox setup failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": \"\", \"Status\": \"closed\"})})]"
+            }
+          },
+          "result": "vars.close_mailbox_exception"
+        },
+        "next": "close_mailbox_exception_split",
+        "label": "Close the mailbox exception"
+      },
+      {
+        "id": "open_mailbox_not_listed",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:mailbox:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail mailbox setup failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": \"mailboxMissing\", \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_mailbox_not_listed"
+        },
+        "next": "end_mailbox_not_listed",
+        "label": "Record that Zapmail did not list this mailbox"
+      },
+      {
+        "id": "end_mailbox_not_listed",
+        "return": {
+          "value": {
+            "literal": "zapmail_mailbox_missing"
+          }
+        },
+        "label": "Mailbox not listed"
+      },
+      {
+        "id": "if_domain_waiting_after_dns",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.zapmail_domain_status == \"PENDING\" || vars.zapmail_domain_status == \"IN_PROGRESS\"",
+              "next": "open_domain_waiting"
+            }
+          ],
+          "default": "open_domain_status_after"
+        },
+        "label": "Zapmail domain is still provisioning after the DNS wait?"
+      },
+      {
+        "id": "open_domain_waiting",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"ZapMail domain setup failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"domainStatus:\" + string(vars.zapmail_domain_status)), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_domain_waiting"
+        },
+        "next": "end_domain_status_waiting",
+        "label": "Record that Zapmail is still provisioning"
+      },
+      {
+        "id": "end_domain_status_waiting",
+        "return": {
+          "value": {
+            "literal": "zapmail_domain_waiting"
+          }
+        },
+        "label": "Domain status waiting"
+      },
+      {
+        "id": "open_domain_status_after",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"ZapMail domain setup failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"domainStatus:\" + string(vars.zapmail_domain_status)), \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_domain_status_after"
+        },
+        "next": "end_domain_status_after",
+        "label": "Record the Zapmail domain status after the wait"
+      },
+      {
+        "id": "end_domain_status_after",
+        "return": {
+          "value": {
+            "literal": "zapmail_domain_status"
+          }
+        },
+        "label": "Domain status after"
+      },
+      {
+        "id": "open_domain_missing",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:zapmail:\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"ZapMail domain setup failed\", \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": \"domainMissing\", \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_domain_missing"
+        },
+        "next": "end_domain_missing",
+        "label": "Record that Zapmail has no domain"
+      },
+      {
+        "id": "end_domain_missing",
+        "return": {
+          "value": {
+            "literal": "zapmail_domain_missing"
+          }
+        },
+        "label": "Domain missing"
+      },
+      {
+        "id": "open_provision_input_exception",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "updateRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Exceptions"
+            },
+            "performUpsert": {
+              "literal": {
+                "fieldsToMergeOn": [
+                  "Key"
+                ]
+              }
+            },
+            "records": {
+              "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:microsoft:input\"), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Invalid Microsoft provisioning input\", \"Domain\": (string(((type(input.domain) == string && input.domain != \"\") ? input.domain : \"\")).lowerAscii()), \"Detail\": \"domain, domainRegistration, and mailbox are required. mailbox needs firstName, lastName, and username. One run provisions that one domain and one mailbox.\", \"Status\": \"open\"})})]"
+            }
+          },
+          "result": "vars.open_provision_input_exception"
+        },
+        "next": "end_invalid_provision_input",
+        "label": "Record invalid provisioning input"
+      },
+      {
+        "id": "end_invalid_provision_input",
+        "return": {
+          "value": {
+            "literal": "invalid_provision_input"
+          }
+        },
+        "label": "Invalid provision input"
+      },
+      {
+        "id": "close_mailbox_exception_split",
+        "parallel": {
+          "branches": [
+            {
+              "id": "main",
+              "steps": [
+                {
+                  "id": "create_oauth_connection",
+                  "call": {
+                    "installedApp": {
+                      "installation": "saleslumen-emails",
+                      "operation": "createOauthConnection"
+                    },
+                    "args": {
+                      "body": {
+                        "expr": "{\"provider\": \"microsoft\", \"login_hint\": (vars.mailbox.username + '@' + vars.domain)}"
+                      }
+                    },
+                    "result": "local.create_oauth_connection",
+                    "onError": {
+                      "next": "open_saleslumen_oauth_failed",
+                      "error": "local.create_oauth_connection_error"
+                    }
+                  },
+                  "next": "stash_oauth",
+                  "label": "Create mailbox OAuth connection"
+                },
+                {
+                  "id": "stash_oauth",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.oauth_connection_id",
+                        "value": {
+                          "expr": "local.create_oauth_connection.id"
+                        }
+                      },
+                      {
+                        "path": "local.oauth_link",
+                        "value": {
+                          "expr": "local.create_oauth_connection.auth_url"
+                        }
+                      },
+                      {
+                        "path": "local.zapmail_mailbox_id",
+                        "value": {
+                          "expr": "(size((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())) > 0 && (vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].?id.orValue(null) != null ? string((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].id) : \"\")"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "create_custom_oauth",
+                  "label": "Stash mailbox OAuth connection"
+                },
+                {
+                  "id": "create_custom_oauth",
+                  "call": {
+                    "installedApp": {
+                      "installation": "zapmail",
+                      "operation": "createCustomOAuth"
+                    },
+                    "args": {
+                      "serviceProvider": {
+                        "literal": "MICROSOFT"
+                      },
+                      "x-workspace-key": {
+                        "expr": "input.zapmail_workspace_id"
+                      },
+                      "microsoft": {
+                        "expr": "{\"mailboxesPerDomain\": ({vars.zapmail_domain_id: [{\"mailboxId\": local.zapmail_mailbox_id, \"oauthLink\": local.oauth_link}]})}"
+                      }
+                    },
+                    "result": "local.create_custom_oauth",
+                    "onError": {
+                      "next": "open_saleslumen_oauth_submit_failed",
+                      "error": "local.create_custom_oauth_error"
+                    }
+                  },
+                  "next": "get_oauth_connection",
+                  "label": "Connect mailbox OAuth"
+                },
+                {
+                  "id": "get_oauth_connection",
+                  "call": {
+                    "installedApp": {
+                      "installation": "saleslumen-emails",
+                      "operation": "getOauthConnection"
+                    },
+                    "args": {
+                      "connection_id": {
+                        "expr": "local.oauth_connection_id"
+                      }
+                    },
+                    "result": "local.get_oauth_connection",
+                    "onError": {
+                      "next": "open_saleslumen_oauth_read_failed",
+                      "error": "local.get_oauth_connection_error"
+                    }
+                  },
+                  "next": "stash_emails_account",
+                  "label": "Read mailbox OAuth connection"
+                },
+                {
+                  "id": "stash_emails_account",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.emails_account_id",
+                        "value": {
+                          "expr": "((type(local.get_oauth_connection.account_id) == string && local.get_oauth_connection.account_id != \"\") ? local.get_oauth_connection.account_id : \"\")"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "upsert_provisioning_account",
+                  "label": "Stash Saleslumen Emails account"
+                },
+                {
+                  "id": "upsert_provisioning_account",
+                  "call": {
+                    "installedApp": {
+                      "installation": "airtable",
+                      "operation": "updateRecords"
+                    },
+                    "args": {
+                      "baseId": {
+                        "literal": "AIRTABLE_BASE_ID"
+                      },
+                      "tableIdOrName": {
+                        "literal": "Email Accounts"
+                      },
+                      "performUpsert": {
+                        "literal": {
+                          "fieldsToMergeOn": [
+                            "Email"
+                          ]
+                        }
+                      },
+                      "records": {
+                        "expr": "[({\"fields\": ({\"Email\": (string(vars.mailbox.username).trim().lowerAscii() + '@' + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Domain\": (string(vars.domain).lowerAscii()), \"Zapmail Mailbox ID\": (local.zapmail_mailbox_id), \"Saleslumen Emails Account ID\": (local.emails_account_id)})})]"
+                      }
+                    },
+                    "result": "local.upsert_provisioning_account",
+                    "onError": {
+                      "next": "end_saleslumen_record_failed",
+                      "error": "local.upsert_provisioning_account_error"
+                    }
+                  },
+                  "next": "end_saleslumen_connected",
+                  "label": "Upsert provisioning email account"
+                },
+                {
+                  "id": "end_saleslumen_connected",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "saleslumen_connected"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_saleslumen_connected_end",
+                  "label": "Saleslumen connected"
+                },
+                {
+                  "id": "end_saleslumen_connected_end",
+                  "end": {},
+                  "label": "Saleslumen connected"
+                },
+                {
+                  "id": "end_saleslumen_record_failed",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "saleslumen_record_failed"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_saleslumen_record_failed_end",
+                  "label": "Saleslumen record failed"
+                },
+                {
+                  "id": "end_saleslumen_record_failed_end",
+                  "end": {},
+                  "label": "Saleslumen record failed"
+                },
+                {
+                  "id": "open_saleslumen_oauth_failed",
+                  "call": {
+                    "installedApp": {
+                      "installation": "airtable",
+                      "operation": "updateRecords"
+                    },
+                    "args": {
+                      "baseId": {
+                        "literal": "AIRTABLE_BASE_ID"
+                      },
+                      "tableIdOrName": {
+                        "literal": "Exceptions"
+                      },
+                      "performUpsert": {
+                        "literal": {
+                          "fieldsToMergeOn": [
+                            "Key"
+                          ]
+                        }
+                      },
+                      "records": {
+                        "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:saleslumen:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Saleslumen OAuth connection failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"createOauthConnection:\" + string((local.create_oauth_connection_error.reason != \"\" ? local.create_oauth_connection_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                      }
+                    },
+                    "result": "local.open_saleslumen_oauth_failed",
+                    "onError": {
+                      "next": "end_saleslumen_oauth_failed",
+                      "error": "local.open_saleslumen_oauth_failed_error"
+                    }
+                  },
+                  "next": "end_saleslumen_oauth_failed",
+                  "label": "Record that the Saleslumen OAuth connection failed"
+                },
+                {
+                  "id": "end_saleslumen_oauth_failed",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "saleslumen_oauth_failed"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_saleslumen_oauth_failed_end",
+                  "label": "Saleslumen oauth failed"
+                },
+                {
+                  "id": "end_saleslumen_oauth_failed_end",
+                  "end": {},
+                  "label": "Saleslumen oauth failed"
+                },
+                {
+                  "id": "open_saleslumen_oauth_submit_failed",
+                  "call": {
+                    "installedApp": {
+                      "installation": "airtable",
+                      "operation": "updateRecords"
+                    },
+                    "args": {
+                      "baseId": {
+                        "literal": "AIRTABLE_BASE_ID"
+                      },
+                      "tableIdOrName": {
+                        "literal": "Exceptions"
+                      },
+                      "performUpsert": {
+                        "literal": {
+                          "fieldsToMergeOn": [
+                            "Key"
+                          ]
+                        }
+                      },
+                      "records": {
+                        "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:saleslumen:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Zapmail OAuth submit failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"createCustomOAuth:\" + string((local.create_custom_oauth_error.reason != \"\" ? local.create_custom_oauth_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                      }
+                    },
+                    "result": "local.open_saleslumen_oauth_submit_failed",
+                    "onError": {
+                      "next": "end_saleslumen_oauth_submit_failed",
+                      "error": "local.open_saleslumen_oauth_submit_failed_error"
+                    }
+                  },
+                  "next": "end_saleslumen_oauth_submit_failed",
+                  "label": "Record that Zapmail rejected the OAuth link"
+                },
+                {
+                  "id": "end_saleslumen_oauth_submit_failed",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "saleslumen_oauth_submit_failed"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_saleslumen_oauth_submit_failed_end",
+                  "label": "Saleslumen oauth submit failed"
+                },
+                {
+                  "id": "end_saleslumen_oauth_submit_failed_end",
+                  "end": {},
+                  "label": "Saleslumen oauth submit failed"
+                },
+                {
+                  "id": "open_saleslumen_oauth_read_failed",
+                  "call": {
+                    "installedApp": {
+                      "installation": "airtable",
+                      "operation": "updateRecords"
+                    },
+                    "args": {
+                      "baseId": {
+                        "literal": "AIRTABLE_BASE_ID"
+                      },
+                      "tableIdOrName": {
+                        "literal": "Exceptions"
+                      },
+                      "performUpsert": {
+                        "literal": {
+                          "fieldsToMergeOn": [
+                            "Key"
+                          ]
+                        }
+                      },
+                      "records": {
+                        "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:saleslumen:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Saleslumen OAuth read failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"getOauthConnection:\" + string((local.get_oauth_connection_error.reason != \"\" ? local.get_oauth_connection_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                      }
+                    },
+                    "result": "local.open_saleslumen_oauth_read_failed",
+                    "onError": {
+                      "next": "end_saleslumen_oauth_read_failed",
+                      "error": "local.open_saleslumen_oauth_read_failed_error"
+                    }
+                  },
+                  "next": "end_saleslumen_oauth_read_failed",
+                  "label": "Record that the Saleslumen OAuth read failed"
+                },
+                {
+                  "id": "end_saleslumen_oauth_read_failed",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "saleslumen_oauth_read_failed"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_saleslumen_oauth_read_failed_end",
+                  "label": "Saleslumen oauth read failed"
+                },
+                {
+                  "id": "end_saleslumen_oauth_read_failed_end",
+                  "end": {},
+                  "label": "Saleslumen oauth read failed"
+                }
+              ],
+              "local": "object{create_custom_oauth: any, create_custom_oauth_error: any, create_oauth_connection: any, create_oauth_connection_error: any, emails_account_id: any, get_oauth_connection: any, get_oauth_connection_error: any, oauth_connection_id: any, oauth_link: any, open_saleslumen_oauth_failed: any, open_saleslumen_oauth_failed_error: any, open_saleslumen_oauth_read_failed: any, open_saleslumen_oauth_read_failed_error: any, open_saleslumen_oauth_submit_failed: any, open_saleslumen_oauth_submit_failed_error: any, outcome: string, upsert_provisioning_account: any, upsert_provisioning_account_error: any, zapmail_mailbox_id: any}"
+            },
+            {
+              "id": "async",
+              "steps": [
+                {
+                  "id": "stash_export_ids",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.export_ids",
+                        "value": {
+                          "expr": "(size((vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())) > 0 && (vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].?id.orValue(null) != null ? [(vars.zapmail_mailboxes).filter(row, string(row.?username.orValue(\"\")).trim().lowerAscii() == string(vars.mailbox.username).trim().lowerAscii())[0].id] : [])"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "export_mailboxes",
+                  "label": "Save this mailbox id for Truly Inbox"
+                },
+                {
+                  "id": "export_mailboxes",
+                  "call": {
+                    "installedApp": {
+                      "installation": "zapmail",
+                      "operation": "exportMailboxes"
+                    },
+                    "args": {
+                      "serviceProvider": {
+                        "literal": "MICROSOFT"
+                      },
+                      "x-workspace-key": {
+                        "expr": "input.zapmail_workspace_id"
+                      },
+                      "apps": {
+                        "literal": [
+                          "TRULYINBOX"
+                        ]
+                      },
+                      "ids": {
+                        "expr": "local.export_ids"
+                      },
+                      "excludeIds": {
+                        "literal": []
+                      },
+                      "tagIds": {
+                        "literal": []
+                      },
+                      "status": {
+                        "literal": "ACTIVE"
+                      },
+                      "contains": {
+                        "expr": "vars.domain"
+                      },
+                      "thirdPartyAccountId": {
+                        "expr": "input.trulyinbox_third_party_account_id"
+                      }
+                    },
+                    "result": "local.export_mailboxes",
+                    "onError": {
+                      "next": "open_truly_export_failed",
+                      "error": "local.export_mailboxes_error"
+                    }
+                  },
+                  "next": "end_provisioned",
+                  "label": "Export this mailbox to Truly Inbox"
+                },
+                {
+                  "id": "end_provisioned",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "microsoft infrastructure provisioned"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_provisioned_end",
+                  "label": "Microsoft infrastructure provisioned"
+                },
+                {
+                  "id": "end_provisioned_end",
+                  "end": {},
+                  "label": "Microsoft infrastructure provisioned"
+                },
+                {
+                  "id": "open_truly_export_failed",
+                  "call": {
+                    "installedApp": {
+                      "installation": "airtable",
+                      "operation": "updateRecords"
+                    },
+                    "args": {
+                      "baseId": {
+                        "literal": "AIRTABLE_BASE_ID"
+                      },
+                      "tableIdOrName": {
+                        "literal": "Exceptions"
+                      },
+                      "performUpsert": {
+                        "literal": {
+                          "fieldsToMergeOn": [
+                            "Key"
+                          ]
+                        }
+                      },
+                      "records": {
+                        "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":provision:truly:\" + string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Provision Microsoft infrastructure\", \"Kind\": \"provisioning\", \"Subject\": \"Truly Inbox export failed\", \"Email\": (string(vars.mailbox.username).trim().lowerAscii() + \"@\" + string(vars.domain).lowerAscii()), \"Domain\": (string(vars.domain).lowerAscii()), \"Detail\": (\"exportMailboxes:\" + string((local.export_mailboxes_error.reason != \"\" ? local.export_mailboxes_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                      }
+                    },
+                    "result": "local.open_truly_export_failed",
+                    "onError": {
+                      "next": "end_truly_export_failed",
+                      "error": "local.open_truly_export_failed_error"
+                    }
+                  },
+                  "next": "end_truly_export_failed",
+                  "label": "Record that the Truly Inbox export failed"
+                },
+                {
+                  "id": "end_truly_export_failed",
+                  "assign": {
+                    "assignments": [
+                      {
+                        "path": "local.outcome",
+                        "value": {
+                          "literal": "truly_export_failed"
+                        }
+                      }
+                    ]
+                  },
+                  "next": "end_truly_export_failed_end",
+                  "label": "Truly export failed"
+                },
+                {
+                  "id": "end_truly_export_failed_end",
+                  "end": {},
+                  "label": "Truly export failed"
+                }
+              ],
+              "local": "object{export_ids: any, export_mailboxes: any, export_mailboxes_error: any, open_truly_export_failed: any, open_truly_export_failed_error: any, outcome: string}"
+            }
+          ],
+          "all": {},
+          "result": "vars.close_mailbox_exception_split"
+        },
+        "label": "Connect and export"
+      }
+    ],
+    "input": "object{namespace_name: string, domain: string, domain_registration: any, mailbox: any, zapmail_workspace_id: string, trulyinbox_third_party_account_id: string, currency: string?}",
+    "vars": {
+      "add_domain_forwarding": "any",
+      "add_domain_forwarding_error": "any",
+      "assign_mailboxes": "any",
+      "assign_mailboxes_error": "any",
+      "close_dynadot_exception": "any",
+      "close_mailbox_exception": "any",
+      "close_mailbox_exception_split": "any",
+      "close_provision_input_exception": "any",
+      "close_zapmail_exception": "any",
+      "connect_domain": "any",
+      "connect_domain_error": "any",
+      "currency": "any",
+      "domain": "any",
+      "domain_registration": "any",
+      "list_mailboxes": "any",
+      "list_mailboxes_error": "any",
+      "list_zapmail_domain_after_dns": "any",
+      "list_zapmail_domain_after_dns_error": "any",
+      "mailbox": "any",
+      "open_domain_missing": "any",
+      "open_domain_status_after": "any",
+      "open_domain_waiting": "any",
+      "open_mailbox_assign_failed": "any",
+      "open_mailbox_lookup_failed": "any",
+      "open_mailbox_not_listed": "any",
+      "open_nameservers_failed": "any",
+      "open_provision_input_exception": "any",
+      "open_zapmail_connect_failed": "any",
+      "open_zapmail_forward_failed": "any",
+      "open_zapmail_lookup_failed": "any",
+      "record_assigned_mailbox": "any",
+      "record_dynadot_domain": "any",
+      "record_mailbox_id": "any",
+      "register_domain": "any",
+      "set_nameservers": "any",
+      "set_nameservers_error": "any",
+      "upsert_namespace": "any",
+      "zapmail_domain": "any",
+      "zapmail_domain_forward_to": "any",
+      "zapmail_domain_id": "any",
+      "zapmail_domain_status": "any",
+      "zapmail_domain_total_pages": "any",
+      "zapmail_mailboxes": "any"
+    }
+  }
+}

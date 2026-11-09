@@ -1,0 +1,9 @@
+{
+  "name": "managed-service",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mui/icons-material": "^7.3.1",
+    "playwright": "^1.61.1"
+  }
+}

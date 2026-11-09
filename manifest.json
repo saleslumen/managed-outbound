@@ -1,0 +1,113 @@
+{
+  "workflows": [
+    {
+      "slug": "provision-google-infrastructure",
+      "name": "Provision Google infrastructure",
+      "scope": "namespace",
+      "category": "client_product",
+      "stage": "infrastructure",
+      "file": "workflows/provision-google-infrastructure.json",
+      "installations": [
+        "dynadot",
+        "zapmail",
+        "saleslumen-emails",
+        "airtable"
+      ],
+      "purpose": "One run provisions one domain and one mailbox. Invalid input ends before any provider call. registerDomain buys the domain for one year with privacy full. setNameservers points it at CloudNS, connectDomains adds it to Zapmail, then the run waits 12 hours and reads the domain. ACTIVE forwards to example.com, assigns the mailbox, waits 12 hours, reads the mailbox, then runs the Saleslumen connection and the Zapmail Truly Inbox export together. Both branches finish before the run ends, and a caught error in one does not cancel the other. The run ends with an empty execution result. PENDING, IN_PROGRESS, a missing domain, and any other status open the Zapmail exception and end. addGoogleClientId has no documented read.",
+      "requiredInputs": [
+        "namespace_name",
+        "domain",
+        "domain_registration",
+        "mailbox",
+        "zapmail_workspace_id",
+        "trulyinbox_third_party_account_id"
+      ]
+    },
+    {
+      "slug": "provision-microsoft-infrastructure",
+      "name": "Provision Microsoft infrastructure",
+      "scope": "namespace",
+      "category": "client_product",
+      "stage": "infrastructure",
+      "file": "workflows/provision-microsoft-infrastructure.json",
+      "installations": [
+        "dynadot",
+        "zapmail",
+        "saleslumen-emails",
+        "airtable"
+      ],
+      "purpose": "One run provisions one domain and one mailbox. Invalid input ends before any provider call. registerDomain buys the domain for one year with privacy full. setNameservers points it at CloudNS, connectDomains adds it to Zapmail, then the run waits 12 hours and reads the domain. ACTIVE forwards to example.com, assigns the mailbox, waits 12 hours, reads the mailbox, then runs the Saleslumen connection and the Zapmail Truly Inbox export together. Both branches finish before the run ends, and a caught error in one does not cancel the other. The run ends with an empty execution result. PENDING, IN_PROGRESS, a missing domain, and any other status open the Zapmail exception and end.",
+      "requiredInputs": [
+        "namespace_name",
+        "domain",
+        "domain_registration",
+        "mailbox",
+        "zapmail_workspace_id",
+        "trulyinbox_third_party_account_id"
+      ]
+    },
+    {
+      "slug": "monitor-warm-up",
+      "name": "Monitor warm up",
+      "scope": "namespace",
+      "category": "client_product",
+      "stage": "warm up",
+      "file": "workflows/monitor-warm-up.json",
+      "installations": [
+        "trulyinbox",
+        "saleslumen-emails",
+        "airtable"
+      ],
+      "purpose": "On a schedule, read Truly Inbox Workspace ID from the Namespaces row and list one page of ready accounts whose deliverability rate is 85 or above. A longer page ends trulyinbox_list_truncated. Set each matching active or paused Saleslumen account to warmupMaxLimit 10, timezone UTC, and a schedule that sends every day. Resume a paused account, mark it sending, and close its sender exception. An account that is already active is marked sending and is not resumed. Needs no inputs.",
+      "requiredInputs": []
+    },
+    {
+      "slug": "monitor-sender-health",
+      "name": "Monitor sender health",
+      "scope": "namespace",
+      "category": "client_product",
+      "stage": "senders",
+      "file": "workflows/monitor-sender-health.json",
+      "installations": [
+        "trulyinbox",
+        "saleslumen-emails",
+        "airtable"
+      ],
+      "purpose": "On a schedule, read Truly Inbox Workspace ID from the Namespaces row and paginate the workspace accounts, ready accounts, and warming accounts sequentially from pagination.total_pages, up to 1,000 records per inventory. An inventory exceeding that bound ends trulyinbox_list_limit_exceeded; an invalid or inconsistent pagination response ends trulyinbox_pagination_invalid. All three inventories complete before any sender changes. An account still warming, or an account with no Truly Inbox mailbox, is left as it is. An account is healthy when it is on the ready page, its deliverability rate is 85 or above, and its status is not DISCONNECTED. An Emails state other than active or paused is not healthy. Pause a failing active account and set warmupMaxLimit to 20 in UTC, every day. A failing account that is already paused is set the same way and left paused. Monitor warm up resumes a healthy paused account once it is on the ready page. Write the Email Account status on each pause and an Exceptions row for every account that is not healthy. Needs no inputs.",
+      "requiredInputs": []
+    },
+    {
+      "slug": "process-campaign-replies",
+      "name": "Process campaign replies",
+      "scope": "namespace",
+      "category": "client_product",
+      "stage": "replies",
+      "file": "workflows/process-campaign-replies.json",
+      "installations": [
+        "openrouter",
+        "saleslumen-emails",
+        "airtable"
+      ],
+      "purpose": "On TRIGGER_EVENT_THREAD_LABEL_ADDED, continue only when the label name is Interested. On TRIGGER_EVENT_MESSAGE_REPLIED, continue only when Interested is already among the reply's user_label_ids. Both paths read that thread's latest inbound message and send one reply as the mailbox that received it, on the same thread, with In-Reply-To and References. OpenRouter writes the reply text. A direct reply already after that inbound message ends without sending. A missing inbound message, a missing Message-ID, an empty reply, or a failed send upserts an open Exceptions row. CRM automation is intentionally unconfigured pending explicit owner, pipeline, and stage settings.",
+      "requiredInputs": []
+    }
+  ],
+  "triggers": [
+    {
+      "workflow": "process-campaign-replies",
+      "eventType": "TRIGGER_EVENT_THREAD_LABEL_ADDED"
+    },
+    {
+      "workflow": "process-campaign-replies",
+      "eventType": "TRIGGER_EVENT_MESSAGE_REPLIED"
+    }
+  ],
+  "platformBoundary": {
+    "orgTemplatePlusNamespaceHeader": false,
+    "proof": [
+      "workflows placement is the sl-namespace-id header on the workflow, not a field of the execution",
+      "an execution cannot override the workflow namespace"
+    ],
+    "summary": "Org-scoped workflows cannot accept a per-execution namespace override. Namespace product workflows are installed in the namespace. Organization workflows stay on the organization."
+  }
+}

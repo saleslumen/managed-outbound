@@ -1,0 +1,552 @@
+{
+  "displayName": "Monitor warm up",
+  "definition": {
+    "steps": [
+      {
+        "id": "list_namespace",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "listRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Namespaces"
+            },
+            "filterByFormula": {
+              "expr": "\"{Saleslumen Namespace ID}='\" + execution.namespace + \"'\""
+            },
+            "maxRecords": {
+              "literal": 1
+            }
+          },
+          "result": "vars.list_namespace"
+        },
+        "next": "assign_workspace",
+        "label": "Read the namespace row"
+      },
+      {
+        "id": "assign_workspace",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.trulyinbox_workspace_id",
+              "value": {
+                "expr": "int(string(vars.list_namespace.records[0].fields[\"Truly Inbox Workspace ID\"]))"
+              }
+            }
+          ]
+        },
+        "next": "list_trulyinbox_accounts",
+        "label": "Read the Truly Inbox workspace id"
+      },
+      {
+        "id": "list_trulyinbox_accounts",
+        "call": {
+          "installedApp": {
+            "installation": "trulyinbox",
+            "operation": "listEmailAccounts"
+          },
+          "args": {
+            "workspaceId": {
+              "expr": "vars.trulyinbox_workspace_id"
+            },
+            "limit": {
+              "literal": 100
+            },
+            "outreachReadiness": {
+              "literal": [
+                "ready"
+              ]
+            },
+            "deliverabilityMin": {
+              "literal": 85
+            }
+          },
+          "result": "vars.list_trulyinbox_accounts"
+        },
+        "next": "if_trulyinbox_page",
+        "label": "List Truly Inbox accounts"
+      },
+      {
+        "id": "if_trulyinbox_page",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.list_trulyinbox_accounts.?pagination.?has_more.orValue(false) == true",
+              "next": "end_trulyinbox_list_truncated"
+            }
+          ],
+          "default": "stash_ready_mailboxes"
+        },
+        "label": "Truly Inbox returned every account"
+      },
+      {
+        "id": "stash_ready_mailboxes",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.ready_mailboxes",
+              "value": {
+                "expr": "(vars.list_trulyinbox_accounts.?data.orValue([])).filter(account, type(account.emailAddress) == string && (type(account.deliverabilityRate) == int || type(account.deliverabilityRate) == double) && account.deliverabilityRate >= 85.0).map(account, {\"email\": account.emailAddress.lowerAscii(), \"trulyInboxAccountId\": account.id})"
+              }
+            }
+          ]
+        },
+        "next": "list_emails_accounts",
+        "label": "Keep mailboxes ready for outreach at 85 or above"
+      },
+      {
+        "id": "list_emails_accounts",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "listAccounts"
+          },
+          "args": {},
+          "result": "vars.list_emails_accounts"
+        },
+        "next": "stash_ready_accounts",
+        "label": "List email accounts"
+      },
+      {
+        "id": "stash_ready_accounts",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.ready_accounts",
+              "value": {
+                "expr": "(type(vars.list_emails_accounts) == list ? vars.list_emails_accounts : []).map(account, {\"email\": string(account.?email_address.orValue(\"\")).lowerAscii(), \"account\": account, \"mailbox\": (vars.ready_mailboxes).filter(row, row.email == string(account.?email_address.orValue(\"\")).lowerAscii())}).filter(row, size(row.mailbox) > 0 && (row.account.state == \"ACTIVE\" || row.account.state == \"PAUSED\")).map(row, {\"accountId\": row.account.id, \"email\": row.email, \"trulyInboxAccountId\": row.mailbox[0].trulyInboxAccountId, \"paused\": row.account.state == \"PAUSED\"})"
+              }
+            }
+          ]
+        },
+        "next": "if_ready_accounts",
+        "label": "Ready mailboxes with an active or paused email account"
+      },
+      {
+        "id": "if_ready_accounts",
+        "switch": {
+          "cases": [
+            {
+              "when": "size(vars.ready_accounts) > 0",
+              "next": "foreach_ready_account"
+            }
+          ],
+          "default": "end_no_ready_accounts"
+        },
+        "label": "Any mailbox ready?"
+      },
+      {
+        "id": "foreach_ready_account",
+        "for_each": {
+          "items": {
+            "expr": "vars.ready_accounts"
+          },
+          "item_name": "ready_account",
+          "steps": [
+            {
+              "id": "set_monitoring_warmup",
+              "call": {
+                "installedApp": {
+                  "installation": "trulyinbox",
+                  "operation": "updateWarmupSettings"
+                },
+                "args": {
+                  "workspaceId": {
+                    "expr": "vars.trulyinbox_workspace_id"
+                  },
+                  "id": {
+                    "expr": "ready_account.trulyInboxAccountId"
+                  },
+                  "warmupMaxLimit": {
+                    "literal": 10
+                  },
+                  "timezone": {
+                    "literal": "UTC"
+                  },
+                  "schedule": {
+                    "literal": [
+                      {
+                        "dayOfWeek": 0,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 1,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 2,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 3,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 4,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 5,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 6,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      }
+                    ]
+                  }
+                },
+                "result": "local.set_monitoring_warmup",
+                "onError": {
+                  "next": "open_set_monitoring_warmup_failed",
+                  "error": "local.set_monitoring_warmup_error"
+                }
+              },
+              "next": "if_account_paused",
+              "label": "Warm up at 10 emails a day"
+            },
+            {
+              "id": "if_account_paused",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "ready_account.paused == true",
+                    "next": "resume_account"
+                  }
+                ],
+                "default": "record_sending_active"
+              },
+              "label": "Email account is paused?"
+            },
+            {
+              "id": "open_set_monitoring_warmup_failed",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + ready_account.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor warm up\", \"Kind\": \"sender\", \"Subject\": (ready_account.email), \"Email\": (ready_account.email), \"Detail\": (\"updateWarmupSettings:\" + string((local.set_monitoring_warmup_error.reason != \"\" ? local.set_monitoring_warmup_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_set_monitoring_warmup_failed"
+              },
+              "next": "end_set_monitoring_warmup_failed",
+              "label": "Record that warm up was not set"
+            },
+            {
+              "id": "end_set_monitoring_warmup_failed",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "set_monitoring_warmup_failed"
+                    }
+                  }
+                ]
+              },
+              "next": "end_set_monitoring_warmup_failed_end",
+              "label": "Set monitoring warmup failed"
+            },
+            {
+              "id": "end_set_monitoring_warmup_failed_end",
+              "end": {},
+              "label": "Set monitoring warmup failed"
+            },
+            {
+              "id": "resume_account",
+              "call": {
+                "installedApp": {
+                  "installation": "saleslumen-emails",
+                  "operation": "resumeAccount"
+                },
+                "args": {
+                  "account_id": {
+                    "expr": "ready_account.accountId"
+                  },
+                  "body": {
+                    "literal": {}
+                  }
+                },
+                "result": "local.resume_account",
+                "onError": {
+                  "next": "open_resume_account_failed",
+                  "error": "local.resume_account_error"
+                }
+              },
+              "next": "record_sending",
+              "label": "Resume email account"
+            },
+            {
+              "id": "record_sending",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Email Accounts"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Email"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Email\": (ready_account.email), \"Saleslumen Namespace ID\": (execution.namespace), \"Status\": \"sending\", \"Truly Inbox Account ID\": (string(ready_account.trulyInboxAccountId))})})]"
+                  }
+                },
+                "result": "local.record_sending"
+              },
+              "next": "close_sender_exception",
+              "label": "Record mailbox sending"
+            },
+            {
+              "id": "close_sender_exception",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + ready_account.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor warm up\", \"Kind\": \"sender\", \"Subject\": (ready_account.email), \"Email\": (ready_account.email), \"Detail\": \"\", \"Status\": \"closed\"})})]"
+                  }
+                },
+                "result": "local.close_sender_exception"
+              },
+              "next": "end_account_resumed",
+              "label": "Close the sender exception"
+            },
+            {
+              "id": "end_account_resumed",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "account_resumed"
+                    }
+                  }
+                ]
+              },
+              "next": "end_account_resumed_end",
+              "label": "Account resumed"
+            },
+            {
+              "id": "end_account_resumed_end",
+              "end": {},
+              "label": "Account resumed"
+            },
+            {
+              "id": "open_resume_account_failed",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + ready_account.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor warm up\", \"Kind\": \"sender\", \"Subject\": (ready_account.email), \"Email\": (ready_account.email), \"Detail\": (\"resumeAccount:\" + string((local.resume_account_error.reason != \"\" ? local.resume_account_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_resume_account_failed"
+              },
+              "next": "end_resume_account_failed",
+              "label": "Record that the mailbox was not resumed"
+            },
+            {
+              "id": "end_resume_account_failed",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "resume_account_failed"
+                    }
+                  }
+                ]
+              },
+              "next": "end_resume_account_failed_end",
+              "label": "Resume account failed"
+            },
+            {
+              "id": "end_resume_account_failed_end",
+              "end": {},
+              "label": "Resume account failed"
+            },
+            {
+              "id": "record_sending_active",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Email Accounts"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Email"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Email\": (ready_account.email), \"Saleslumen Namespace ID\": (execution.namespace), \"Status\": \"sending\", \"Truly Inbox Account ID\": (string(ready_account.trulyInboxAccountId))})})]"
+                  }
+                },
+                "result": "local.record_sending_active"
+              },
+              "next": "end_account_recorded",
+              "label": "Record mailbox sending"
+            },
+            {
+              "id": "end_account_recorded",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "account_recorded"
+                    }
+                  }
+                ]
+              },
+              "next": "end_account_recorded_end",
+              "label": "Account recorded"
+            },
+            {
+              "id": "end_account_recorded_end",
+              "end": {},
+              "label": "Account recorded"
+            }
+          ],
+          "local": "object{close_sender_exception: any, open_resume_account_failed: any, open_set_monitoring_warmup_failed: any, outcome: string, record_sending: any, record_sending_active: any, resume_account: any, resume_account_error: any, set_monitoring_warmup: any, set_monitoring_warmup_error: any}"
+        },
+        "next": "end_accounts_checked",
+        "label": "Prepare each ready mailbox"
+      },
+      {
+        "id": "end_accounts_checked",
+        "return": {
+          "value": {
+            "literal": "accounts_checked"
+          }
+        },
+        "label": "Accounts checked"
+      },
+      {
+        "id": "end_no_ready_accounts",
+        "return": {
+          "value": {
+            "literal": "no_ready_accounts"
+          }
+        },
+        "label": "No ready accounts"
+      },
+      {
+        "id": "end_trulyinbox_list_truncated",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_list_truncated"
+          }
+        },
+        "label": "Truly Inbox list is longer than one page"
+      }
+    ],
+    "input": "object{}",
+    "vars": {
+      "list_emails_accounts": "any",
+      "list_trulyinbox_accounts": "any",
+      "ready_accounts": "any",
+      "ready_mailboxes": "any",
+      "list_namespace": "any",
+      "trulyinbox_workspace_id": "integer"
+    }
+  }
+}

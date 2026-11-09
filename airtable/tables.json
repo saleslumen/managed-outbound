@@ -1,0 +1,73 @@
+{
+  "tables": [
+    {
+      "name": "Namespaces",
+      "description": "One row per namespace. Status is onboarding after provisioning. Set it to active when sending starts.",
+      "fields": [
+        { "name": "Name", "type": "singleLineText" },
+        { "name": "Saleslumen Namespace ID", "type": "singleLineText" },
+        {
+          "name": "Status",
+          "type": "singleSelect",
+          "options": { "choices": [{ "name": "onboarding" }, { "name": "active" }] }
+        },
+        { "name": "Zapmail Workspace ID", "type": "singleLineText" },
+        { "name": "Truly Inbox Workspace ID", "type": "singleLineText" }
+      ]
+    },
+    {
+      "name": "Domains",
+      "description": "One row per domain Dynadot owns for a namespace.",
+      "fields": [
+        { "name": "Domain", "type": "singleLineText" },
+        { "name": "Saleslumen Namespace ID", "type": "singleLineText" }
+      ]
+    },
+    {
+      "name": "Email Accounts",
+      "description": "One row per sender email address.",
+      "fields": [
+        { "name": "Email", "type": "singleLineText" },
+        { "name": "Saleslumen Namespace ID", "type": "singleLineText" },
+        { "name": "Domain", "type": "singleLineText" },
+        { "name": "Zapmail Mailbox ID", "type": "singleLineText" },
+        { "name": "Saleslumen Emails Account ID", "type": "singleLineText" },
+        { "name": "Truly Inbox Account ID", "type": "singleLineText" },
+        {
+          "name": "Status",
+          "type": "singleSelect",
+          "options": {
+            "choices": [
+              { "name": "provisioning" },
+              { "name": "sending" },
+              { "name": "degraded" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Exceptions",
+      "description": "The operator queue. One row per thing a person must act on, upserted on Key. Status is open while a person must act and closed when a later run resolves it. Workflow names the definition that wrote the row.",
+      "fields": [
+        { "name": "Key", "type": "singleLineText" },
+        { "name": "Saleslumen Namespace ID", "type": "singleLineText" },
+        { "name": "Workflow", "type": "singleLineText" },
+        {
+          "name": "Kind",
+          "type": "singleSelect",
+          "options": { "choices": [{ "name": "provisioning" }, { "name": "sender" }, { "name": "reply" }] }
+        },
+        { "name": "Subject", "type": "singleLineText" },
+        { "name": "Email", "type": "singleLineText" },
+        { "name": "Domain", "type": "singleLineText" },
+        { "name": "Detail", "type": "multilineText" },
+        {
+          "name": "Status",
+          "type": "singleSelect",
+          "options": { "choices": [{ "name": "open" }, { "name": "closed" }] }
+        }
+      ]
+    }
+  ]
+}

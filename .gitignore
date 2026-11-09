@@ -1,0 +1,7 @@
+node_modules/
+.env
+environment/*.env
+!environment/*.env.example
+environment/*.targets.json
+environment/*.install.json
+previews/*.html

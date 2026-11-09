@@ -1,0 +1,1545 @@
+{
+  "displayName": "Monitor sender health",
+  "definition": {
+    "steps": [
+      {
+        "id": "list_namespace",
+        "call": {
+          "installedApp": {
+            "installation": "airtable",
+            "operation": "listRecords"
+          },
+          "args": {
+            "baseId": {
+              "literal": "AIRTABLE_BASE_ID"
+            },
+            "tableIdOrName": {
+              "literal": "Namespaces"
+            },
+            "filterByFormula": {
+              "expr": "\"{Saleslumen Namespace ID}='\" + execution.namespace + \"'\""
+            },
+            "maxRecords": {
+              "literal": 1
+            }
+          },
+          "result": "vars.list_namespace"
+        },
+        "next": "assign_workspace",
+        "label": "Read the namespace row"
+      },
+      {
+        "id": "assign_workspace",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.trulyinbox_workspace_id",
+              "value": {
+                "expr": "int(string(vars.list_namespace.records[0].fields[\"Truly Inbox Workspace ID\"]))"
+              }
+            }
+          ]
+        },
+        "next": "initialize_trulyinbox_inventories",
+        "label": "Read the Truly Inbox workspace id"
+      },
+      {
+        "id": "initialize_trulyinbox_inventories",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.trulyinbox_accounts",
+              "value": {
+                "literal": []
+              }
+            },
+            {
+              "path": "vars.ready_account_emails",
+              "value": {
+                "literal": []
+              }
+            },
+            {
+              "path": "vars.warming_account_emails",
+              "value": {
+                "literal": []
+              }
+            }
+          ]
+        },
+        "next": "list_accounts_page_1",
+        "label": "Initialize Truly Inbox inventory accumulators"
+      },
+      {
+        "id": "list_accounts_page_1",
+        "call": {
+          "installedApp": {
+            "installation": "trulyinbox",
+            "operation": "listEmailAccounts"
+          },
+          "args": {
+            "workspaceId": {
+              "expr": "vars.trulyinbox_workspace_id"
+            },
+            "limit": {
+              "literal": 100
+            },
+            "page": {
+              "literal": 1
+            }
+          },
+          "result": "vars.list_trulyinbox_accounts"
+        },
+        "next": "validate_accounts_page_1",
+        "label": "List accounts page 1"
+      },
+      {
+        "id": "validate_accounts_page_1",
+        "switch": {
+          "cases": [
+            {
+              "when": "type(vars.list_trulyinbox_accounts.?data.orValue(null)) != list || type(vars.list_trulyinbox_accounts.?pagination.orValue(null)) != map || (type(vars.list_trulyinbox_accounts.?pagination.?page.orValue(null)) != int && type(vars.list_trulyinbox_accounts.?pagination.?page.orValue(null)) != double) || (type(vars.list_trulyinbox_accounts.?pagination.?total_pages.orValue(null)) != int && type(vars.list_trulyinbox_accounts.?pagination.?total_pages.orValue(null)) != double) || type(vars.list_trulyinbox_accounts.?pagination.?has_more.orValue(null)) != bool || vars.list_trulyinbox_accounts.pagination.page != 1 || int(vars.list_trulyinbox_accounts.pagination.total_pages) != vars.list_trulyinbox_accounts.pagination.total_pages || vars.list_trulyinbox_accounts.pagination.total_pages < 1 || vars.list_trulyinbox_accounts.pagination.has_more != (vars.list_trulyinbox_accounts.pagination.total_pages > 1)",
+              "next": "end_accounts_page_1_invalid"
+            },
+            {
+              "when": "vars.list_trulyinbox_accounts.pagination.total_pages > 10",
+              "next": "end_accounts_list_limit_exceeded"
+            }
+          ],
+          "default": "append_accounts_page_1"
+        },
+        "label": "Validate accounts page 1 pagination"
+      },
+      {
+        "id": "end_accounts_page_1_invalid",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_pagination_invalid"
+          }
+        },
+        "label": "Accounts page 1 pagination invalid"
+      },
+      {
+        "id": "end_accounts_list_limit_exceeded",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_list_limit_exceeded"
+          }
+        },
+        "label": "Accounts inventory exceeds 1,000 accounts"
+      },
+      {
+        "id": "append_accounts_page_1",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.trulyinbox_accounts",
+              "value": {
+                "expr": "vars.list_trulyinbox_accounts.data.filter(account, type(account.emailAddress) == string).map(account, {\"email\": account.emailAddress.lowerAscii(), \"status\": account.status, \"trulyInboxAccountId\": account.id, \"trulyInboxBroken\": account.status == \"DISCONNECTED\", \"deliverabilityRate\": (type(account.deliverabilityRate) == int || type(account.deliverabilityRate) == double) ? account.deliverabilityRate : null})"
+              }
+            }
+          ]
+        },
+        "next": "foreach_accounts_pages",
+        "label": "Keep accounts page 1"
+      },
+      {
+        "id": "foreach_accounts_pages",
+        "for_each": {
+          "items": {
+            "expr": "[2, 3, 4, 5, 6, 7, 8, 9, 10].filter(page, page <= vars.list_trulyinbox_accounts.pagination.total_pages)"
+          },
+          "item_name": "page",
+          "index_name": "page_index",
+          "concurrency": 1,
+          "result": "vars.accounts_page_results",
+          "steps": [
+            {
+              "id": "list_accounts_page",
+              "call": {
+                "installedApp": {
+                  "installation": "trulyinbox",
+                  "operation": "listEmailAccounts"
+                },
+                "args": {
+                  "workspaceId": {
+                    "expr": "vars.trulyinbox_workspace_id"
+                  },
+                  "limit": {
+                    "literal": 100
+                  },
+                  "page": {
+                    "expr": "page"
+                  }
+                },
+                "result": "local.page_response"
+              },
+              "next": "validate_accounts_page",
+              "label": "List accounts page"
+            },
+            {
+              "id": "validate_accounts_page",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "type(local.page_response.?data.orValue(null)) != list || type(local.page_response.?pagination.orValue(null)) != map || (type(local.page_response.?pagination.?page.orValue(null)) != int && type(local.page_response.?pagination.?page.orValue(null)) != double) || (type(local.page_response.?pagination.?total_pages.orValue(null)) != int && type(local.page_response.?pagination.?total_pages.orValue(null)) != double) || type(local.page_response.?pagination.?has_more.orValue(null)) != bool || local.page_response.pagination.page != page || local.page_response.pagination.total_pages != vars.list_trulyinbox_accounts.pagination.total_pages || local.page_response.pagination.has_more != (page < vars.list_trulyinbox_accounts.pagination.total_pages)",
+                    "next": "mark_accounts_page_invalid"
+                  }
+                ],
+                "default": "keep_accounts_page"
+              },
+              "label": "Validate accounts page"
+            },
+            {
+              "id": "mark_accounts_page_invalid",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.page_accounts",
+                    "value": {
+                      "literal": []
+                    }
+                  },
+                  {
+                    "path": "local.invalid",
+                    "value": {
+                      "literal": true
+                    }
+                  },
+                  {
+                    "path": "local.page_response",
+                    "value": {
+                      "literal": null
+                    }
+                  }
+                ]
+              },
+              "next": "end_accounts_page",
+              "label": "Mark invalid pagination"
+            },
+            {
+              "id": "keep_accounts_page",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.page_accounts",
+                    "value": {
+                      "expr": "local.page_response.data.filter(account, type(account.emailAddress) == string).map(account, {\"email\": account.emailAddress.lowerAscii(), \"status\": account.status, \"trulyInboxAccountId\": account.id, \"trulyInboxBroken\": account.status == \"DISCONNECTED\", \"deliverabilityRate\": (type(account.deliverabilityRate) == int || type(account.deliverabilityRate) == double) ? account.deliverabilityRate : null})"
+                    }
+                  },
+                  {
+                    "path": "local.invalid",
+                    "value": {
+                      "literal": false
+                    }
+                  },
+                  {
+                    "path": "local.page_response",
+                    "value": {
+                      "literal": null
+                    }
+                  }
+                ]
+              },
+              "next": "end_accounts_page",
+              "label": "Keep accounts page"
+            },
+            {
+              "id": "end_accounts_page",
+              "end": {},
+              "label": "Page complete"
+            }
+          ],
+          "local": "object{invalid: bool, page_accounts: list<any>, page_response: any}"
+        },
+        "next": "validate_accounts_page_results",
+        "label": "List remaining accounts pages sequentially"
+      },
+      {
+        "id": "validate_accounts_page_results",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.accounts_page_results.exists(result, result.invalid)",
+              "next": "end_accounts_page_results_invalid"
+            }
+          ],
+          "default": "append_accounts_pages"
+        },
+        "label": "Validate accounts page results"
+      },
+      {
+        "id": "end_accounts_page_results_invalid",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_pagination_invalid"
+          }
+        },
+        "label": "Accounts page pagination invalid"
+      },
+      {
+        "id": "append_accounts_pages",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.trulyinbox_accounts",
+              "value": {
+                "expr": "vars.trulyinbox_accounts + vars.accounts_page_results.map(result, result.page_accounts).flatten()"
+              }
+            },
+            {
+              "path": "vars.accounts_page_results",
+              "value": {
+                "literal": []
+              }
+            },
+            {
+              "path": "vars.list_trulyinbox_accounts",
+              "value": {
+                "literal": null
+              }
+            }
+          ]
+        },
+        "next": "list_ready_accounts_page_1",
+        "label": "Keep remaining accounts pages"
+      },
+      {
+        "id": "list_ready_accounts_page_1",
+        "call": {
+          "installedApp": {
+            "installation": "trulyinbox",
+            "operation": "listEmailAccounts"
+          },
+          "args": {
+            "workspaceId": {
+              "expr": "vars.trulyinbox_workspace_id"
+            },
+            "limit": {
+              "literal": 100
+            },
+            "page": {
+              "literal": 1
+            },
+            "outreachReadiness": {
+              "literal": [
+                "ready"
+              ]
+            },
+            "deliverabilityMin": {
+              "literal": 85
+            }
+          },
+          "result": "vars.list_ready_accounts"
+        },
+        "next": "validate_ready_accounts_page_1",
+        "label": "List ready accounts page 1"
+      },
+      {
+        "id": "validate_ready_accounts_page_1",
+        "switch": {
+          "cases": [
+            {
+              "when": "type(vars.list_ready_accounts.?data.orValue(null)) != list || type(vars.list_ready_accounts.?pagination.orValue(null)) != map || (type(vars.list_ready_accounts.?pagination.?page.orValue(null)) != int && type(vars.list_ready_accounts.?pagination.?page.orValue(null)) != double) || (type(vars.list_ready_accounts.?pagination.?total_pages.orValue(null)) != int && type(vars.list_ready_accounts.?pagination.?total_pages.orValue(null)) != double) || type(vars.list_ready_accounts.?pagination.?has_more.orValue(null)) != bool || vars.list_ready_accounts.pagination.page != 1 || int(vars.list_ready_accounts.pagination.total_pages) != vars.list_ready_accounts.pagination.total_pages || vars.list_ready_accounts.pagination.total_pages < 1 || vars.list_ready_accounts.pagination.has_more != (vars.list_ready_accounts.pagination.total_pages > 1)",
+              "next": "end_ready_accounts_page_1_invalid"
+            },
+            {
+              "when": "vars.list_ready_accounts.pagination.total_pages > 10",
+              "next": "end_ready_accounts_list_limit_exceeded"
+            }
+          ],
+          "default": "append_ready_accounts_page_1"
+        },
+        "label": "Validate ready accounts page 1 pagination"
+      },
+      {
+        "id": "end_ready_accounts_page_1_invalid",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_pagination_invalid"
+          }
+        },
+        "label": "Ready accounts page 1 pagination invalid"
+      },
+      {
+        "id": "end_ready_accounts_list_limit_exceeded",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_list_limit_exceeded"
+          }
+        },
+        "label": "Ready accounts inventory exceeds 1,000 accounts"
+      },
+      {
+        "id": "append_ready_accounts_page_1",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.ready_account_emails",
+              "value": {
+                "expr": "vars.list_ready_accounts.data.filter(account, type(account.emailAddress) == string).map(account, account.emailAddress.lowerAscii())"
+              }
+            }
+          ]
+        },
+        "next": "foreach_ready_accounts_pages",
+        "label": "Keep ready accounts page 1"
+      },
+      {
+        "id": "foreach_ready_accounts_pages",
+        "for_each": {
+          "items": {
+            "expr": "[2, 3, 4, 5, 6, 7, 8, 9, 10].filter(page, page <= vars.list_ready_accounts.pagination.total_pages)"
+          },
+          "item_name": "page",
+          "index_name": "page_index",
+          "concurrency": 1,
+          "result": "vars.ready_accounts_page_results",
+          "steps": [
+            {
+              "id": "list_ready_accounts_page",
+              "call": {
+                "installedApp": {
+                  "installation": "trulyinbox",
+                  "operation": "listEmailAccounts"
+                },
+                "args": {
+                  "workspaceId": {
+                    "expr": "vars.trulyinbox_workspace_id"
+                  },
+                  "limit": {
+                    "literal": 100
+                  },
+                  "page": {
+                    "expr": "page"
+                  },
+                  "outreachReadiness": {
+                    "literal": [
+                      "ready"
+                    ]
+                  },
+                  "deliverabilityMin": {
+                    "literal": 85
+                  }
+                },
+                "result": "local.page_response"
+              },
+              "next": "validate_ready_accounts_page",
+              "label": "List ready accounts page"
+            },
+            {
+              "id": "validate_ready_accounts_page",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "type(local.page_response.?data.orValue(null)) != list || type(local.page_response.?pagination.orValue(null)) != map || (type(local.page_response.?pagination.?page.orValue(null)) != int && type(local.page_response.?pagination.?page.orValue(null)) != double) || (type(local.page_response.?pagination.?total_pages.orValue(null)) != int && type(local.page_response.?pagination.?total_pages.orValue(null)) != double) || type(local.page_response.?pagination.?has_more.orValue(null)) != bool || local.page_response.pagination.page != page || local.page_response.pagination.total_pages != vars.list_ready_accounts.pagination.total_pages || local.page_response.pagination.has_more != (page < vars.list_ready_accounts.pagination.total_pages)",
+                    "next": "mark_ready_accounts_page_invalid"
+                  }
+                ],
+                "default": "keep_ready_accounts_page"
+              },
+              "label": "Validate ready accounts page"
+            },
+            {
+              "id": "mark_ready_accounts_page_invalid",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.page_accounts",
+                    "value": {
+                      "literal": []
+                    }
+                  },
+                  {
+                    "path": "local.invalid",
+                    "value": {
+                      "literal": true
+                    }
+                  },
+                  {
+                    "path": "local.page_response",
+                    "value": {
+                      "literal": null
+                    }
+                  }
+                ]
+              },
+              "next": "end_ready_accounts_page",
+              "label": "Mark invalid pagination"
+            },
+            {
+              "id": "keep_ready_accounts_page",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.page_accounts",
+                    "value": {
+                      "expr": "local.page_response.data.filter(account, type(account.emailAddress) == string).map(account, account.emailAddress.lowerAscii())"
+                    }
+                  },
+                  {
+                    "path": "local.invalid",
+                    "value": {
+                      "literal": false
+                    }
+                  },
+                  {
+                    "path": "local.page_response",
+                    "value": {
+                      "literal": null
+                    }
+                  }
+                ]
+              },
+              "next": "end_ready_accounts_page",
+              "label": "Keep ready accounts page"
+            },
+            {
+              "id": "end_ready_accounts_page",
+              "end": {},
+              "label": "Page complete"
+            }
+          ],
+          "local": "object{invalid: bool, page_accounts: list<any>, page_response: any}"
+        },
+        "next": "validate_ready_accounts_page_results",
+        "label": "List remaining ready accounts pages sequentially"
+      },
+      {
+        "id": "validate_ready_accounts_page_results",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.ready_accounts_page_results.exists(result, result.invalid)",
+              "next": "end_ready_accounts_page_results_invalid"
+            }
+          ],
+          "default": "append_ready_accounts_pages"
+        },
+        "label": "Validate ready accounts page results"
+      },
+      {
+        "id": "end_ready_accounts_page_results_invalid",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_pagination_invalid"
+          }
+        },
+        "label": "Ready accounts page pagination invalid"
+      },
+      {
+        "id": "append_ready_accounts_pages",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.ready_account_emails",
+              "value": {
+                "expr": "vars.ready_account_emails + vars.ready_accounts_page_results.map(result, result.page_accounts).flatten()"
+              }
+            },
+            {
+              "path": "vars.ready_accounts_page_results",
+              "value": {
+                "literal": []
+              }
+            },
+            {
+              "path": "vars.list_ready_accounts",
+              "value": {
+                "literal": null
+              }
+            }
+          ]
+        },
+        "next": "list_warming_accounts_page_1",
+        "label": "Keep remaining ready accounts pages"
+      },
+      {
+        "id": "list_warming_accounts_page_1",
+        "call": {
+          "installedApp": {
+            "installation": "trulyinbox",
+            "operation": "listEmailAccounts"
+          },
+          "args": {
+            "workspaceId": {
+              "expr": "vars.trulyinbox_workspace_id"
+            },
+            "limit": {
+              "literal": 100
+            },
+            "page": {
+              "literal": 1
+            },
+            "outreachReadiness": {
+              "literal": [
+                "warming"
+              ]
+            }
+          },
+          "result": "vars.list_warming_accounts"
+        },
+        "next": "validate_warming_accounts_page_1",
+        "label": "List warming accounts page 1"
+      },
+      {
+        "id": "validate_warming_accounts_page_1",
+        "switch": {
+          "cases": [
+            {
+              "when": "type(vars.list_warming_accounts.?data.orValue(null)) != list || type(vars.list_warming_accounts.?pagination.orValue(null)) != map || (type(vars.list_warming_accounts.?pagination.?page.orValue(null)) != int && type(vars.list_warming_accounts.?pagination.?page.orValue(null)) != double) || (type(vars.list_warming_accounts.?pagination.?total_pages.orValue(null)) != int && type(vars.list_warming_accounts.?pagination.?total_pages.orValue(null)) != double) || type(vars.list_warming_accounts.?pagination.?has_more.orValue(null)) != bool || vars.list_warming_accounts.pagination.page != 1 || int(vars.list_warming_accounts.pagination.total_pages) != vars.list_warming_accounts.pagination.total_pages || vars.list_warming_accounts.pagination.total_pages < 1 || vars.list_warming_accounts.pagination.has_more != (vars.list_warming_accounts.pagination.total_pages > 1)",
+              "next": "end_warming_accounts_page_1_invalid"
+            },
+            {
+              "when": "vars.list_warming_accounts.pagination.total_pages > 10",
+              "next": "end_warming_accounts_list_limit_exceeded"
+            }
+          ],
+          "default": "append_warming_accounts_page_1"
+        },
+        "label": "Validate warming accounts page 1 pagination"
+      },
+      {
+        "id": "end_warming_accounts_page_1_invalid",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_pagination_invalid"
+          }
+        },
+        "label": "Warming accounts page 1 pagination invalid"
+      },
+      {
+        "id": "end_warming_accounts_list_limit_exceeded",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_list_limit_exceeded"
+          }
+        },
+        "label": "Warming accounts inventory exceeds 1,000 accounts"
+      },
+      {
+        "id": "append_warming_accounts_page_1",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.warming_account_emails",
+              "value": {
+                "expr": "vars.list_warming_accounts.data.filter(account, type(account.emailAddress) == string).map(account, account.emailAddress.lowerAscii())"
+              }
+            }
+          ]
+        },
+        "next": "foreach_warming_accounts_pages",
+        "label": "Keep warming accounts page 1"
+      },
+      {
+        "id": "foreach_warming_accounts_pages",
+        "for_each": {
+          "items": {
+            "expr": "[2, 3, 4, 5, 6, 7, 8, 9, 10].filter(page, page <= vars.list_warming_accounts.pagination.total_pages)"
+          },
+          "item_name": "page",
+          "index_name": "page_index",
+          "concurrency": 1,
+          "result": "vars.warming_accounts_page_results",
+          "steps": [
+            {
+              "id": "list_warming_accounts_page",
+              "call": {
+                "installedApp": {
+                  "installation": "trulyinbox",
+                  "operation": "listEmailAccounts"
+                },
+                "args": {
+                  "workspaceId": {
+                    "expr": "vars.trulyinbox_workspace_id"
+                  },
+                  "limit": {
+                    "literal": 100
+                  },
+                  "page": {
+                    "expr": "page"
+                  },
+                  "outreachReadiness": {
+                    "literal": [
+                      "warming"
+                    ]
+                  }
+                },
+                "result": "local.page_response"
+              },
+              "next": "validate_warming_accounts_page",
+              "label": "List warming accounts page"
+            },
+            {
+              "id": "validate_warming_accounts_page",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "type(local.page_response.?data.orValue(null)) != list || type(local.page_response.?pagination.orValue(null)) != map || (type(local.page_response.?pagination.?page.orValue(null)) != int && type(local.page_response.?pagination.?page.orValue(null)) != double) || (type(local.page_response.?pagination.?total_pages.orValue(null)) != int && type(local.page_response.?pagination.?total_pages.orValue(null)) != double) || type(local.page_response.?pagination.?has_more.orValue(null)) != bool || local.page_response.pagination.page != page || local.page_response.pagination.total_pages != vars.list_warming_accounts.pagination.total_pages || local.page_response.pagination.has_more != (page < vars.list_warming_accounts.pagination.total_pages)",
+                    "next": "mark_warming_accounts_page_invalid"
+                  }
+                ],
+                "default": "keep_warming_accounts_page"
+              },
+              "label": "Validate warming accounts page"
+            },
+            {
+              "id": "mark_warming_accounts_page_invalid",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.page_accounts",
+                    "value": {
+                      "literal": []
+                    }
+                  },
+                  {
+                    "path": "local.invalid",
+                    "value": {
+                      "literal": true
+                    }
+                  },
+                  {
+                    "path": "local.page_response",
+                    "value": {
+                      "literal": null
+                    }
+                  }
+                ]
+              },
+              "next": "end_warming_accounts_page",
+              "label": "Mark invalid pagination"
+            },
+            {
+              "id": "keep_warming_accounts_page",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.page_accounts",
+                    "value": {
+                      "expr": "local.page_response.data.filter(account, type(account.emailAddress) == string).map(account, account.emailAddress.lowerAscii())"
+                    }
+                  },
+                  {
+                    "path": "local.invalid",
+                    "value": {
+                      "literal": false
+                    }
+                  },
+                  {
+                    "path": "local.page_response",
+                    "value": {
+                      "literal": null
+                    }
+                  }
+                ]
+              },
+              "next": "end_warming_accounts_page",
+              "label": "Keep warming accounts page"
+            },
+            {
+              "id": "end_warming_accounts_page",
+              "end": {},
+              "label": "Page complete"
+            }
+          ],
+          "local": "object{invalid: bool, page_accounts: list<any>, page_response: any}"
+        },
+        "next": "validate_warming_accounts_page_results",
+        "label": "List remaining warming accounts pages sequentially"
+      },
+      {
+        "id": "validate_warming_accounts_page_results",
+        "switch": {
+          "cases": [
+            {
+              "when": "vars.warming_accounts_page_results.exists(result, result.invalid)",
+              "next": "end_warming_accounts_page_results_invalid"
+            }
+          ],
+          "default": "append_warming_accounts_pages"
+        },
+        "label": "Validate warming accounts page results"
+      },
+      {
+        "id": "end_warming_accounts_page_results_invalid",
+        "return": {
+          "value": {
+            "literal": "trulyinbox_pagination_invalid"
+          }
+        },
+        "label": "Warming accounts page pagination invalid"
+      },
+      {
+        "id": "append_warming_accounts_pages",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.warming_account_emails",
+              "value": {
+                "expr": "vars.warming_account_emails + vars.warming_accounts_page_results.map(result, result.page_accounts).flatten()"
+              }
+            },
+            {
+              "path": "vars.warming_accounts_page_results",
+              "value": {
+                "literal": []
+              }
+            },
+            {
+              "path": "vars.list_warming_accounts",
+              "value": {
+                "literal": null
+              }
+            }
+          ]
+        },
+        "next": "stash_warmup_mailboxes",
+        "label": "Keep remaining warming accounts pages"
+      },
+      {
+        "id": "stash_warmup_mailboxes",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.warmup_mailboxes",
+              "value": {
+                "expr": "vars.trulyinbox_accounts.map(account, {\"email\": account.email, \"status\": account.status, \"trulyInboxAccountId\": account.trulyInboxAccountId, \"trulyInboxBroken\": account.trulyInboxBroken, \"readyForOutreach\": vars.ready_account_emails.exists(email, email == account.email), \"warming\": vars.warming_account_emails.exists(email, email == account.email), \"deliverabilityRate\": account.deliverabilityRate})"
+              }
+            }
+          ]
+        },
+        "next": "list_emails_accounts",
+        "label": "Keep each mailbox and its warm up score"
+      },
+      {
+        "id": "list_emails_accounts",
+        "call": {
+          "installedApp": {
+            "installation": "saleslumen-emails",
+            "operation": "listAccounts"
+          },
+          "args": {},
+          "result": "vars.list_emails_accounts"
+        },
+        "next": "stash_senders",
+        "label": "List email accounts"
+      },
+      {
+        "id": "stash_senders",
+        "assign": {
+          "assignments": [
+            {
+              "path": "vars.senders",
+              "value": {
+                "expr": "(type(vars.list_emails_accounts) == list ? vars.list_emails_accounts : []).map(account, {\"email\": string(account.?email_address.orValue(\"\")).lowerAscii(), \"account\": account, \"mailbox\": (vars.warmup_mailboxes).filter(row, row.email == string(account.?email_address.orValue(\"\")).lowerAscii())}).map(row, size(row.mailbox) == 0 ? {\"accountId\": row.account.id, \"email\": row.email, \"state\": row.account.state == \"ACTIVE\" ? \"ACTIVE\" : (row.account.state == \"PAUSED\" ? \"PAUSED\" : \"UNKNOWN\"), \"status\": \"\", \"unmapped\": true, \"warming\": false, \"trulyInboxAccountId\": null, \"trulyInboxBroken\": false, \"readyForOutreach\": false, \"deliverabilityRate\": null} : {\"accountId\": row.account.id, \"email\": row.email, \"state\": row.account.state == \"ACTIVE\" ? \"ACTIVE\" : (row.account.state == \"PAUSED\" ? \"PAUSED\" : \"UNKNOWN\"), \"status\": string(row.mailbox[0].?status.orValue(\"\")), \"unmapped\": false, \"warming\": row.mailbox[0].warming == true, \"trulyInboxAccountId\": row.mailbox[0].trulyInboxAccountId, \"trulyInboxBroken\": row.mailbox[0].trulyInboxBroken == true, \"readyForOutreach\": row.mailbox[0].readyForOutreach == true, \"deliverabilityRate\": row.mailbox[0].deliverabilityRate})"
+              }
+            }
+          ]
+        },
+        "next": "foreach_sender",
+        "label": "Email accounts with their warm up mailbox"
+      },
+      {
+        "id": "foreach_sender",
+        "for_each": {
+          "items": {
+            "expr": "vars.senders"
+          },
+          "item_name": "sender",
+          "steps": [
+            {
+              "id": "if_leave_account",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "sender.unmapped == true || (sender.warming == true && sender.trulyInboxBroken == false)",
+                    "next": "end_account_left"
+                  }
+                ],
+                "default": "if_sender_healthy"
+              },
+              "label": "Still warming or not in Truly Inbox?"
+            },
+            {
+              "id": "end_account_left",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "account_left"
+                    }
+                  }
+                ]
+              },
+              "next": "end_account_left_end",
+              "label": "Account left"
+            },
+            {
+              "id": "end_account_left_end",
+              "end": {},
+              "label": "Account left"
+            },
+            {
+              "id": "if_sender_healthy",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "sender.readyForOutreach == true && (type(sender.deliverabilityRate) == int || type(sender.deliverabilityRate) == double) && sender.deliverabilityRate >= 85.0 && sender.trulyInboxBroken == false && sender.state != \"UNKNOWN\"",
+                    "next": "if_account_paused"
+                  }
+                ],
+                "default": "if_account_active"
+              },
+              "label": "Sender is healthy?"
+            },
+            {
+              "id": "if_account_paused",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "sender.state == \"PAUSED\"",
+                    "next": "end_sender_left_paused"
+                  }
+                ],
+                "default": "close_sender_exception"
+              },
+              "label": "Email account is paused?"
+            },
+            {
+              "id": "end_sender_left_paused",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "sender_left_paused"
+                    }
+                  }
+                ]
+              },
+              "next": "end_sender_left_paused_end",
+              "label": "Sender left paused"
+            },
+            {
+              "id": "end_sender_left_paused_end",
+              "end": {},
+              "label": "Sender left paused"
+            },
+            {
+              "id": "close_sender_exception",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + sender.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor sender health\", \"Kind\": \"sender\", \"Subject\": (sender.email), \"Email\": (sender.email), \"Detail\": (sender.readyForOutreach == true && (type(sender.deliverabilityRate) == int || type(sender.deliverabilityRate) == double) && sender.deliverabilityRate >= 85.0 && sender.trulyInboxBroken == false && sender.state != \"UNKNOWN\"), \"Status\": \"closed\"})})]"
+                  }
+                },
+                "result": "local.close_sender_exception"
+              },
+              "next": "end_sender_healthy",
+              "label": "Record the sender exception"
+            },
+            {
+              "id": "end_sender_healthy",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "sender_healthy"
+                    }
+                  }
+                ]
+              },
+              "next": "end_sender_healthy_end",
+              "label": "Sender healthy"
+            },
+            {
+              "id": "end_sender_healthy_end",
+              "end": {},
+              "label": "Sender healthy"
+            },
+            {
+              "id": "if_account_active",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "sender.state == \"ACTIVE\"",
+                    "next": "set_full_warmup"
+                  }
+                ],
+                "default": "if_paused_with_truly"
+              },
+              "label": "Email account is active?"
+            },
+            {
+              "id": "set_full_warmup",
+              "call": {
+                "installedApp": {
+                  "installation": "trulyinbox",
+                  "operation": "updateWarmupSettings"
+                },
+                "args": {
+                  "workspaceId": {
+                    "expr": "vars.trulyinbox_workspace_id"
+                  },
+                  "id": {
+                    "expr": "sender.trulyInboxAccountId"
+                  },
+                  "warmupMaxLimit": {
+                    "literal": 20
+                  },
+                  "timezone": {
+                    "literal": "UTC"
+                  },
+                  "schedule": {
+                    "literal": [
+                      {
+                        "dayOfWeek": 0,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 1,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 2,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 3,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 4,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 5,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 6,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      }
+                    ]
+                  }
+                },
+                "result": "local.set_full_warmup",
+                "onError": {
+                  "next": "open_set_full_warmup_failed",
+                  "error": "local.set_full_warmup_error"
+                }
+              },
+              "next": "pause_account",
+              "label": "Warm up at 20 emails a day"
+            },
+            {
+              "id": "pause_account",
+              "call": {
+                "installedApp": {
+                  "installation": "saleslumen-emails",
+                  "operation": "pauseAccount"
+                },
+                "args": {
+                  "account_id": {
+                    "expr": "sender.accountId"
+                  },
+                  "body": {
+                    "literal": {}
+                  }
+                },
+                "result": "local.pause_account",
+                "onError": {
+                  "next": "open_pause_account_failed",
+                  "error": "local.pause_account_error"
+                }
+              },
+              "next": "record_degraded",
+              "label": "Pause email account"
+            },
+            {
+              "id": "record_degraded",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Email Accounts"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Email"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Email\": (sender.email), \"Saleslumen Namespace ID\": (execution.namespace), \"Status\": \"degraded\"})})]"
+                  }
+                },
+                "result": "local.record_degraded"
+              },
+              "next": "open_sender_exception",
+              "label": "Record mailbox degraded"
+            },
+            {
+              "id": "open_sender_exception",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + sender.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor sender health\", \"Kind\": \"sender\", \"Subject\": (sender.email), \"Email\": (sender.email), \"Detail\": (sender.readyForOutreach == true && (type(sender.deliverabilityRate) == int || type(sender.deliverabilityRate) == double) && sender.deliverabilityRate >= 85.0 && sender.trulyInboxBroken == false && sender.state != \"UNKNOWN\"), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_sender_exception"
+              },
+              "next": "end_sender_paused",
+              "label": "Record the sender exception"
+            },
+            {
+              "id": "end_sender_paused",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "sender_paused"
+                    }
+                  }
+                ]
+              },
+              "next": "end_sender_paused_end",
+              "label": "Sender paused"
+            },
+            {
+              "id": "end_sender_paused_end",
+              "end": {},
+              "label": "Sender paused"
+            },
+            {
+              "id": "open_set_full_warmup_failed",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + sender.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor sender health\", \"Kind\": \"sender\", \"Subject\": (sender.email), \"Email\": (sender.email), \"Detail\": (\"updateWarmupSettings:\" + string((local.set_full_warmup_error.reason != \"\" ? local.set_full_warmup_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_set_full_warmup_failed"
+              },
+              "next": "end_set_full_warmup_failed",
+              "label": "Record that full warm up was not set"
+            },
+            {
+              "id": "end_set_full_warmup_failed",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "set_full_warmup_failed"
+                    }
+                  }
+                ]
+              },
+              "next": "end_set_full_warmup_failed_end",
+              "label": "Set full warmup failed"
+            },
+            {
+              "id": "end_set_full_warmup_failed_end",
+              "end": {},
+              "label": "Set full warmup failed"
+            },
+            {
+              "id": "open_pause_account_failed",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + sender.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor sender health\", \"Kind\": \"sender\", \"Subject\": (sender.email), \"Email\": (sender.email), \"Detail\": (\"pauseAccount:\" + string((local.pause_account_error.reason != \"\" ? local.pause_account_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_pause_account_failed"
+              },
+              "next": "end_pause_account_failed",
+              "label": "Record that the mailbox was not paused"
+            },
+            {
+              "id": "end_pause_account_failed",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "pause_account_failed"
+                    }
+                  }
+                ]
+              },
+              "next": "end_pause_account_failed_end",
+              "label": "Pause account failed"
+            },
+            {
+              "id": "end_pause_account_failed_end",
+              "end": {},
+              "label": "Pause account failed"
+            },
+            {
+              "id": "if_paused_with_truly",
+              "switch": {
+                "cases": [
+                  {
+                    "when": "sender.state == \"PAUSED\" && sender.trulyInboxAccountId != null",
+                    "next": "set_full_warmup_while_paused"
+                  }
+                ],
+                "default": "open_sender_exception_held"
+              },
+              "label": "Paused sender still has Truly Inbox?"
+            },
+            {
+              "id": "set_full_warmup_while_paused",
+              "call": {
+                "installedApp": {
+                  "installation": "trulyinbox",
+                  "operation": "updateWarmupSettings"
+                },
+                "args": {
+                  "workspaceId": {
+                    "expr": "vars.trulyinbox_workspace_id"
+                  },
+                  "id": {
+                    "expr": "sender.trulyInboxAccountId"
+                  },
+                  "warmupMaxLimit": {
+                    "literal": 20
+                  },
+                  "timezone": {
+                    "literal": "UTC"
+                  },
+                  "schedule": {
+                    "literal": [
+                      {
+                        "dayOfWeek": 0,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 1,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 2,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 3,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 4,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 5,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      },
+                      {
+                        "dayOfWeek": 6,
+                        "slotIndex": 0,
+                        "weight": 100,
+                        "enabled": true,
+                        "startTime": "00:00",
+                        "endTime": "23:59"
+                      }
+                    ]
+                  }
+                },
+                "result": "local.set_full_warmup_while_paused",
+                "onError": {
+                  "next": "open_set_full_warmup_while_paused_failed",
+                  "error": "local.set_full_warmup_while_paused_error"
+                }
+              },
+              "next": "end_sender_already_paused",
+              "label": "Warm up at 20 emails a day"
+            },
+            {
+              "id": "end_sender_already_paused",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "sender_already_paused"
+                    }
+                  }
+                ]
+              },
+              "next": "end_sender_already_paused_end",
+              "label": "Sender already paused"
+            },
+            {
+              "id": "end_sender_already_paused_end",
+              "end": {},
+              "label": "Sender already paused"
+            },
+            {
+              "id": "open_set_full_warmup_while_paused_failed",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + sender.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor sender health\", \"Kind\": \"sender\", \"Subject\": (sender.email), \"Email\": (sender.email), \"Detail\": (\"updateWarmupSettings:\" + string((local.set_full_warmup_while_paused_error.reason != \"\" ? local.set_full_warmup_while_paused_error.reason : \"failed\"))), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_set_full_warmup_while_paused_failed"
+              },
+              "next": "end_set_full_warmup_while_paused_failed",
+              "label": "Record that paused warm up was not set"
+            },
+            {
+              "id": "end_set_full_warmup_while_paused_failed",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "set_full_warmup_while_paused_failed"
+                    }
+                  }
+                ]
+              },
+              "next": "end_set_full_warmup_while_paused_failed_end",
+              "label": "Set full warmup while paused failed"
+            },
+            {
+              "id": "end_set_full_warmup_while_paused_failed_end",
+              "end": {},
+              "label": "Set full warmup while paused failed"
+            },
+            {
+              "id": "open_sender_exception_held",
+              "call": {
+                "installedApp": {
+                  "installation": "airtable",
+                  "operation": "updateRecords"
+                },
+                "args": {
+                  "baseId": {
+                    "literal": "AIRTABLE_BASE_ID"
+                  },
+                  "tableIdOrName": {
+                    "literal": "Exceptions"
+                  },
+                  "performUpsert": {
+                    "literal": {
+                      "fieldsToMergeOn": [
+                        "Key"
+                      ]
+                    }
+                  },
+                  "records": {
+                    "expr": "[({\"fields\": ({\"Key\": (execution.namespace + \":sender:\" + sender.accountId), \"Saleslumen Namespace ID\": (execution.namespace), \"Workflow\": \"Monitor sender health\", \"Kind\": \"sender\", \"Subject\": (sender.email), \"Email\": (sender.email), \"Detail\": (sender.readyForOutreach == true && (type(sender.deliverabilityRate) == int || type(sender.deliverabilityRate) == double) && sender.deliverabilityRate >= 85.0 && sender.trulyInboxBroken == false && sender.state != \"UNKNOWN\"), \"Status\": \"open\"})})]"
+                  }
+                },
+                "result": "local.open_sender_exception_held"
+              },
+              "next": "end_sender_needs_operator",
+              "label": "Record the sender exception"
+            },
+            {
+              "id": "end_sender_needs_operator",
+              "assign": {
+                "assignments": [
+                  {
+                    "path": "local.outcome",
+                    "value": {
+                      "literal": "sender_needs_operator"
+                    }
+                  }
+                ]
+              },
+              "next": "end_sender_needs_operator_end",
+              "label": "Sender needs operator"
+            },
+            {
+              "id": "end_sender_needs_operator_end",
+              "end": {},
+              "label": "Sender needs operator"
+            }
+          ],
+          "local": "object{close_sender_exception: any, open_pause_account_failed: any, open_sender_exception: any, open_sender_exception_held: any, open_set_full_warmup_failed: any, open_set_full_warmup_while_paused_failed: any, outcome: string, pause_account: any, pause_account_error: any, record_degraded: any, set_full_warmup: any, set_full_warmup_error: any, set_full_warmup_while_paused: any, set_full_warmup_while_paused_error: any}"
+        },
+        "next": "end_senders_checked",
+        "label": "Check each sender"
+      },
+      {
+        "id": "end_senders_checked",
+        "return": {
+          "value": {
+            "literal": "senders_checked"
+          }
+        },
+        "label": "Senders checked"
+      }
+    ],
+    "input": "object{}",
+    "vars": {
+      "list_emails_accounts": "any",
+      "list_trulyinbox_accounts": "any",
+      "senders": "any",
+      "warmup_mailboxes": "any",
+      "list_namespace": "any",
+      "trulyinbox_workspace_id": "integer",
+      "list_ready_accounts": "any",
+      "list_warming_accounts": "any",
+      "trulyinbox_accounts": "list<any>",
+      "ready_account_emails": "list<string>",
+      "warming_account_emails": "list<string>",
+      "accounts_page_results": "list<any>",
+      "ready_accounts_page_results": "list<any>",
+      "warming_accounts_page_results": "list<any>"
+    }
+  }
+}
